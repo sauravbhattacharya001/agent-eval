@@ -56,6 +56,7 @@ export { discoverSpecs } from './cli/discover.js';
 
 // Checks (Tier 1 — Deterministic)
 export {
+  // Format validation
   toMatchJsonSchema,
   toBeValidJsonStrict,
   toHaveMarkdownStructure,
@@ -65,6 +66,20 @@ export {
   validateJsonSchema,
   validateMarkdownStructure,
   parseMarkdownStructure,
+  // Path/URL verification
+  toHaveValidUrls,
+  toHaveValidPaths,
+  toHaveValidGitHubRefs,
+  toHaveValidReferences,
+  toReferenceUrls,
+  toHaveWellFormedUrls,
+  toReferencePaths,
+  extractReferences,
+  verifyUrl,
+  verifyFilePath,
+  verifyGitHubRepo,
+  verifyGitHubIssue,
+  verifyReferences,
 } from './checks/index.js';
 export type {
   JsonSchema,
@@ -75,6 +90,12 @@ export type {
   MarkdownStructureOptions,
   MarkdownValidationResult,
   ParsedCodeBlock,
+  ExtractedReference,
+  UrlVerifyOptions,
+  FilePathVerifyOptions,
+  ReferenceVerifyResult,
+  PathVerifyOptions,
+  BatchVerifyOptions,
 } from './checks/index.js';
 
 // Helpers

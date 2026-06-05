@@ -28,3 +28,30 @@ export type {
   MarkdownValidationResult,
   ParsedCodeBlock,
 } from './format.js';
+
+export {
+  // Path/URL verification assertions
+  toHaveValidUrls,
+  toHaveValidPaths,
+  toHaveValidGitHubRefs,
+  toHaveValidReferences,
+  toReferenceUrls,
+  toHaveWellFormedUrls,
+  toReferencePaths,
+  // Utilities
+  extractReferences,
+  verifyUrl,
+  verifyFilePath,
+  verifyGitHubRepo,
+  verifyGitHubIssue,
+  verifyReferences,
+} from './paths.js';
+
+export type {
+  ExtractedReference,
+  UrlVerifyOptions,
+  FilePathVerifyOptions,
+  ReferenceVerifyResult,
+  PathVerifyOptions,
+  BatchVerifyOptions,
+} from './paths.js';

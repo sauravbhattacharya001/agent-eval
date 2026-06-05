@@ -49,5 +49,10 @@ export { TerminalReporter, JsonReporter } from './core/reporter.js';
 export { LocalProvider } from './providers/local.js';
 export type { LocalProviderConfig } from './providers/local.js';
 
+// CLI utilities (for programmatic use)
+export { parseCliArgs } from './cli/args.js';
+export type { ParsedArgs } from './cli/args.js';
+export { discoverSpecs } from './cli/discover.js';
+
 // Helpers
 export { defineEval } from './define.js';

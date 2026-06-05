@@ -54,5 +54,28 @@ export { parseCliArgs } from './cli/args.js';
 export type { ParsedArgs } from './cli/args.js';
 export { discoverSpecs } from './cli/discover.js';
 
+// Checks (Tier 1 — Deterministic)
+export {
+  toMatchJsonSchema,
+  toBeValidJsonStrict,
+  toHaveMarkdownStructure,
+  toHaveSections,
+  toHaveCodeBlocks,
+  toBeFormat,
+  validateJsonSchema,
+  validateMarkdownStructure,
+  parseMarkdownStructure,
+} from './checks/index.js';
+export type {
+  JsonSchema,
+  JsonSchemaType,
+  SchemaValidationError,
+  SchemaValidationResult,
+  MarkdownHeading,
+  MarkdownStructureOptions,
+  MarkdownValidationResult,
+  ParsedCodeBlock,
+} from './checks/index.js';
+
 // Helpers
 export { defineEval } from './define.js';

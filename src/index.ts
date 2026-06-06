@@ -107,6 +107,19 @@ export {
   detectParroting,
   parseUnifiedDiff,
   textSimilarity,
+  // Staleness/timeout detection
+  toCompleteWithinTimeout,
+  toNotBeAbandoned,
+  toNotBeStale,
+  toNotBeStalled,
+  toBeProductiveRun,
+  parseTimestamp,
+  formatDuration,
+  detectTimeout,
+  detectStaleness,
+  detectAbandonment,
+  analyzeProgress,
+  analyzeStaleness,
 } from './checks/index.js';
 export type {
   JsonSchema,
@@ -145,6 +158,14 @@ export type {
   MeaningfulChangeOptions,
   NotNoOpOptions,
   ParrotingOptions,
+  RunEvent,
+  RunTimeline,
+  TimeoutOptions,
+  StalenessOptions,
+  AbandonmentOptions,
+  ProgressOptions,
+  StalenessResult,
+  StalenessIssue,
 } from './checks/index.js';
 
 // Helpers

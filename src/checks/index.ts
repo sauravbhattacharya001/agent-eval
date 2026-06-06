@@ -125,3 +125,31 @@ export type {
   NotNoOpOptions,
   ParrotingOptions,
 } from './diff.js';
+
+export {
+  // Staleness/timeout assertions
+  toCompleteWithinTimeout,
+  toNotBeAbandoned,
+  toNotBeStale,
+  toNotBeStalled,
+  toBeProductiveRun,
+  // Utilities
+  parseTimestamp,
+  formatDuration,
+  detectTimeout,
+  detectStaleness,
+  detectAbandonment,
+  analyzeProgress,
+  analyzeStaleness,
+} from './staleness.js';
+
+export type {
+  RunEvent,
+  RunTimeline,
+  TimeoutOptions,
+  StalenessOptions,
+  AbandonmentOptions,
+  ProgressOptions,
+  StalenessResult,
+  StalenessIssue,
+} from './staleness.js';

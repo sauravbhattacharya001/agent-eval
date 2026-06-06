@@ -55,3 +55,25 @@ export type {
   PathVerifyOptions,
   BatchVerifyOptions,
 } from './paths.js';
+
+export {
+  // Completeness assertions
+  toBeNonEmpty,
+  toMeetLengthRange,
+  toBeSubstantive,
+  toBeComplete,
+  toPassCompletenessCheck,
+  // Utilities
+  analyzeContent,
+  checkCompleteness,
+} from './completeness.js';
+
+export type {
+  ContentMetrics,
+  LengthRangeOptions,
+  SubstanceOptions,
+  StructuralCompletenessOptions,
+  CompletenessOptions,
+  CompletenessViolation,
+  CompletenessResult,
+} from './completeness.js';

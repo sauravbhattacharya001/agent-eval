@@ -80,6 +80,14 @@ export {
   verifyGitHubRepo,
   verifyGitHubIssue,
   verifyReferences,
+  // Completeness checks
+  toBeNonEmpty,
+  toMeetLengthRange,
+  toBeSubstantive,
+  toBeComplete,
+  toPassCompletenessCheck,
+  analyzeContent,
+  checkCompleteness,
 } from './checks/index.js';
 export type {
   JsonSchema,
@@ -96,6 +104,13 @@ export type {
   ReferenceVerifyResult,
   PathVerifyOptions,
   BatchVerifyOptions,
+  ContentMetrics,
+  LengthRangeOptions,
+  SubstanceOptions,
+  StructuralCompletenessOptions,
+  CompletenessOptions,
+  CompletenessViolation,
+  CompletenessResult,
 } from './checks/index.js';
 
 // Helpers

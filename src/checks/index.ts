@@ -100,3 +100,28 @@ export type {
   ConstraintValidationOptions,
   ConstraintValidationResult,
 } from './constraints.js';
+
+export {
+  // Diff analysis assertions
+  toHaveMeaningfulDiff,
+  toNotBeNoOp,
+  toNotParrot,
+  toHaveMinimumChanges,
+  toHaveMeaningfulUnifiedDiff,
+  // Utilities
+  analyzeDiff,
+  detectParroting,
+  parseUnifiedDiff,
+  textSimilarity,
+} from './diff.js';
+
+export type {
+  ChangeKind,
+  DiffChange,
+  DiffMetrics,
+  DiffOptions,
+  DiffResult,
+  MeaningfulChangeOptions,
+  NotNoOpOptions,
+  ParrotingOptions,
+} from './diff.js';

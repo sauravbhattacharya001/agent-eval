@@ -97,6 +97,16 @@ export {
   validateRule,
   validateConstraints,
   calculateKeywordCoverage,
+  // Diff analysis
+  toHaveMeaningfulDiff,
+  toNotBeNoOp,
+  toNotParrot,
+  toHaveMinimumChanges,
+  toHaveMeaningfulUnifiedDiff,
+  analyzeDiff,
+  detectParroting,
+  parseUnifiedDiff,
+  textSimilarity,
 } from './checks/index.js';
 export type {
   JsonSchema,
@@ -127,6 +137,14 @@ export type {
   ViolationLocation,
   ConstraintValidationOptions,
   ConstraintValidationResult,
+  ChangeKind,
+  DiffChange,
+  DiffMetrics,
+  DiffOptions,
+  DiffResult,
+  MeaningfulChangeOptions,
+  NotNoOpOptions,
+  ParrotingOptions,
 } from './checks/index.js';
 
 // Helpers

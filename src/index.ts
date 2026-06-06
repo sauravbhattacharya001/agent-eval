@@ -88,6 +88,15 @@ export {
   toPassCompletenessCheck,
   analyzeContent,
   checkCompleteness,
+  // Constraint validation
+  toContainKeywords,
+  toNotContainKeywords,
+  toMeetKeywordCoverage,
+  toSatisfyConstraints,
+  toMatchPatterns,
+  validateRule,
+  validateConstraints,
+  calculateKeywordCoverage,
 } from './checks/index.js';
 export type {
   JsonSchema,
@@ -111,6 +120,13 @@ export type {
   CompletenessOptions,
   CompletenessViolation,
   CompletenessResult,
+  ConstraintRule,
+  KeywordCoverageOptions,
+  KeywordCoverageResult,
+  ConstraintViolation,
+  ViolationLocation,
+  ConstraintValidationOptions,
+  ConstraintValidationResult,
 } from './checks/index.js';
 
 // Helpers

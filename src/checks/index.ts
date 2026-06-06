@@ -77,3 +77,26 @@ export type {
   CompletenessViolation,
   CompletenessResult,
 } from './completeness.js';
+
+export {
+  // Constraint validation assertions
+  toContainKeywords,
+  toNotContainKeywords,
+  toMeetKeywordCoverage,
+  toSatisfyConstraints,
+  toMatchPatterns,
+  // Utilities
+  validateRule,
+  validateConstraints,
+  calculateKeywordCoverage,
+} from './constraints.js';
+
+export type {
+  ConstraintRule,
+  KeywordCoverageOptions,
+  KeywordCoverageResult,
+  ConstraintViolation,
+  ViolationLocation,
+  ConstraintValidationOptions,
+  ConstraintValidationResult,
+} from './constraints.js';

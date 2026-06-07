@@ -14,6 +14,10 @@ Think: **Jest/Vitest but for agent outputs** instead of functions.
 
 ## Philosophy
 
+**Research-time safety ≠ Production-time safety.**
+
+AI safety research (interpretability, RLHF, Constitutional AI) happens during model development. But once a model ships and agents run autonomously in CI pipelines, code reviews, and customer workflows — who's watching? The research team hands off a safe model. agent-eval ensures it *stays* safe at runtime.
+
 agent-eval is built on an **independence-first** hierarchy. The axis isn't cheap→expensive — it's **independent→corruptible**.
 
 | Tier | Name | Why it works |

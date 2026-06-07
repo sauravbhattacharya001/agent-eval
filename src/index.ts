@@ -211,3 +211,65 @@ export type {
 
 // Helpers
 export { defineEval } from './define.js';
+
+// Keyword Coverage Scoring (Tier 2 — Heuristic)
+export {
+  toCoverKeyTopics,
+  toHaveNoTopicGaps,
+  toMeetKeywordScore,
+  toHaveBalancedCoverage,
+  toAddressTask,
+  extractKeyTerms,
+  scoreKeywordCoverage,
+  identifyTopicGaps,
+} from './checks/index.js';
+export type {
+  KeywordCoverageScoringOptions,
+  ExtractedKeyword,
+  KeywordCoverageScore,
+  SectionCoverageResult,
+  TopicGapOptions,
+  TopicGap,
+  TopicGapResult,
+} from './checks/index.js';
+
+// Judge Framework (Tier 3 — Shared-Substrate Judgment)
+export {
+  buildRubric,
+  RubricBuilder,
+  CriterionBuilder,
+  validateRubric,
+  computeVerdict,
+  normalizeCriterionWeights,
+  getMaxScore,
+  getMinScore,
+  classifyConfidence,
+  buildJudgePrompt,
+  parseJudgeResponse,
+  extractJson,
+  RuleBasedJudge,
+  JudgeEvaluator,
+  toPassJudge,
+  toScoreOnCriterion,
+  toHaveJudgeConfidence,
+  toMeetAllCriteria,
+  toHaveJudgeSuggestions,
+  BUILTIN_RUBRICS,
+} from './checks/index.js';
+export type {
+  RubricCriterion,
+  ScoringLevel,
+  Rubric,
+  JudgeConfidence,
+  CriterionScore,
+  JudgeVerdict,
+  JudgeResult,
+  JudgeOptions,
+  JudgeBackend,
+  JudgeContext,
+  RawJudgeResponse,
+  RawCriterionScore,
+  RubricValidationError,
+  ScoringFunction,
+  JudgeParseError,
+} from './checks/index.js';

@@ -231,3 +231,47 @@ export type {
   TopicGap,
   TopicGapResult,
 } from './keyword-coverage.js';
+
+export {
+  // Judge framework (Tier 3 — Shared-Substrate Judgment)
+  buildRubric,
+  RubricBuilder,
+  CriterionBuilder,
+  validateRubric,
+  computeVerdict,
+  normalizeCriterionWeights,
+  getMaxScore,
+  getMinScore,
+  classifyConfidence,
+  buildJudgePrompt,
+  parseJudgeResponse,
+  extractJson,
+  RuleBasedJudge,
+  JudgeEvaluator,
+  // Assertion factories
+  toPassJudge,
+  toScoreOnCriterion,
+  toHaveJudgeConfidence,
+  toMeetAllCriteria,
+  toHaveJudgeSuggestions,
+  // Built-in rubrics
+  BUILTIN_RUBRICS,
+} from './judge.js';
+
+export type {
+  RubricCriterion,
+  ScoringLevel,
+  Rubric,
+  JudgeConfidence,
+  CriterionScore,
+  JudgeVerdict,
+  JudgeResult,
+  JudgeOptions,
+  JudgeBackend,
+  JudgeContext,
+  RawJudgeResponse,
+  RawCriterionScore,
+  RubricValidationError,
+  ScoringFunction,
+  JudgeParseError,
+} from './judge.js';

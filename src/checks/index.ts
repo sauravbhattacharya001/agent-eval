@@ -208,3 +208,26 @@ export type {
   FullRepetitionOptions,
   FullRepetitionResult,
 } from './repetition.js';
+
+export {
+  // Keyword Coverage Scoring assertions (Tier 2 — Heuristic)
+  toCoverKeyTopics,
+  toHaveNoTopicGaps,
+  toMeetKeywordScore,
+  toHaveBalancedCoverage,
+  toAddressTask,
+  // Utilities
+  extractKeyTerms,
+  scoreKeywordCoverage,
+  identifyTopicGaps,
+} from './keyword-coverage.js';
+
+export type {
+  KeywordCoverageScoringOptions,
+  ExtractedKeyword,
+  KeywordCoverageScore,
+  SectionCoverageResult,
+  TopicGapOptions,
+  TopicGap,
+  TopicGapResult,
+} from './keyword-coverage.js';

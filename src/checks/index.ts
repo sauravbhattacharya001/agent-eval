@@ -176,3 +176,35 @@ export type {
   TopicExtractionOptions,
   ExtractedTopic,
 } from './relevance.js';
+
+export {
+  // Repetition/Loop detection assertions (Tier 2 — Heuristic)
+  toNotRepeat,
+  toNotLoop,
+  toNotBeSaturated,
+  toNotBeRepetitive,
+  toNotExceedRepetitions,
+  // Utilities
+  analyzeRepetition,
+  detectLoops,
+  analyzeNgramSaturation,
+  analyzeFullRepetition,
+  splitSentences,
+  splitParagraphs,
+  splitLines,
+  segmentSimilarity,
+} from './repetition.js';
+
+export type {
+  RepetitionOptions,
+  RepetitionInstance,
+  RepetitionKind,
+  RepetitionResult,
+  LoopDetectionOptions,
+  LoopInstance,
+  LoopResult,
+  NgramSaturationOptions,
+  NgramSaturationResult,
+  FullRepetitionOptions,
+  FullRepetitionResult,
+} from './repetition.js';

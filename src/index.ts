@@ -130,6 +130,20 @@ export {
   vectorize,
   extractTopics,
   topicOverlap,
+  // Repetition/Loop detection (Tier 2 — Heuristic)
+  toNotRepeat,
+  toNotLoop,
+  toNotBeSaturated,
+  toNotBeRepetitive,
+  toNotExceedRepetitions,
+  analyzeRepetition,
+  detectLoops,
+  analyzeNgramSaturation,
+  analyzeFullRepetition,
+  splitSentences,
+  splitParagraphs,
+  splitLines,
+  segmentSimilarity,
 } from './checks/index.js';
 export type {
   JsonSchema,
@@ -182,6 +196,17 @@ export type {
   SectionRelevance,
   TopicExtractionOptions,
   ExtractedTopic,
+  RepetitionOptions,
+  RepetitionInstance,
+  RepetitionKind,
+  RepetitionResult,
+  LoopDetectionOptions,
+  LoopInstance,
+  LoopResult,
+  NgramSaturationOptions,
+  NgramSaturationResult,
+  FullRepetitionOptions,
+  FullRepetitionResult,
 } from './checks/index.js';
 
 // Helpers

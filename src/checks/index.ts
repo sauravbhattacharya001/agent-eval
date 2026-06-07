@@ -153,3 +153,26 @@ export type {
   StalenessResult,
   StalenessIssue,
 } from './staleness.js';
+
+export {
+  // Relevance assertions (Tier 2 — Heuristic)
+  toBeRelevantTo,
+  toNotDriftFrom,
+  toHaveTopicOverlap,
+  toBeOnTopic,
+  // Utilities
+  analyzeRelevance,
+  cosineSimilarity,
+  vectorize,
+  extractTopics,
+  topicOverlap,
+} from './relevance.js';
+
+export type {
+  RelevanceOptions,
+  RelevanceResult,
+  ScoredTerm,
+  SectionRelevance,
+  TopicExtractionOptions,
+  ExtractedTopic,
+} from './relevance.js';

@@ -120,6 +120,16 @@ export {
   detectAbandonment,
   analyzeProgress,
   analyzeStaleness,
+  // Relevance (Tier 2 — Heuristic)
+  toBeRelevantTo,
+  toNotDriftFrom,
+  toHaveTopicOverlap,
+  toBeOnTopic,
+  analyzeRelevance,
+  cosineSimilarity,
+  vectorize,
+  extractTopics,
+  topicOverlap,
 } from './checks/index.js';
 export type {
   JsonSchema,
@@ -166,6 +176,12 @@ export type {
   ProgressOptions,
   StalenessResult,
   StalenessIssue,
+  RelevanceOptions,
+  RelevanceResult,
+  ScoredTerm,
+  SectionRelevance,
+  TopicExtractionOptions,
+  ExtractedTopic,
 } from './checks/index.js';
 
 // Helpers

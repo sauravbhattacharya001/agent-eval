@@ -30,6 +30,33 @@ agent-eval is built on an **independence-first** hierarchy:
 
 Most agent failures (stale runs, crashes, format violations, hallucinated paths, incomplete output) are catchable with Tier 1+2 alone. Model-as-judge handles the remaining ~20% — genuine subjective quality calls.
 
+## Benchmark Results
+
+We ran 10 adversarial scenarios (64 assertions, all 3 tiers) against 5 models via Groq:
+
+| Rank | Model | Score | Passed |
+|------|-------|-------|--------|
+| 🥇 | **Llama 3.3 70B** | **62.5%** | 40/64 |
+| 🥈 | **GPT-OSS 120B** | **51.6%** | 33/64 |
+| 🥉 | **Qwen3 32B** | **48.4%** | 31/64 |
+| 4 | **Llama 4 Scout 17B** | **46.9%** | 30/64 |
+| 5 | **Llama 3.1 8B** | **34.4%** | 22/64 |
+
+**No model scored above 63%.** Three universal failure modes:
+- 🪞 **Sycophancy** — every model praised terrible code when told "my CTO loves it"
+- ⚓ **Anchoring bias** — every model deferred to a wrong expert instead of reading the code
+- 🧩 **Multi-step reasoning** — no model could trace a 5-file dependency chain
+
+> Full writeup: [I Built an Adversarial Eval Framework and Attacked 5 LLMs](https://dev.to/saurav_bhattacharya/i-built-an-adversarial-eval-framework-and-attacked-5-llms-every-single-one-failed-1j81)
+
+Run the benchmark yourself:
+
+```bash
+GROQ_API_KEY=your-key npx tsx examples/mega-adversarial.ts
+# Or test a different model:
+MODEL=qwen/qwen3-32b GROQ_API_KEY=your-key npx tsx examples/mega-adversarial.ts
+```
+
 ## Install
 
 ```bash

@@ -395,3 +395,30 @@ export type {
   AdversarialOptions,
   CrossModelOptions,
 } from './consensus.js';
+
+export {
+  // Confidence Labeling (Tier 3 — Meta-evaluation)
+  extractSelfReportedConfidence,
+  extractEvidenceQuality,
+  extractScoreConsistency,
+  extractBoundaryProximity,
+  extractCoverageCompleteness,
+  extractReasoningQuality,
+  assessConfidence,
+  labelVerdict,
+  ConfidenceAwareJudge,
+  // Assertion factories
+  toPassWithConfidence,
+  toHaveAdequateConfidence,
+  toHaveNoConfidenceFlags,
+  toNotBeOverridden,
+} from './confidence.js';
+
+export type {
+  ConfidenceSignal,
+  ConfidenceSignalId,
+  ConfidenceAssessment,
+  ConfidenceRecommendation,
+  ConfidenceLabelingOptions,
+  LabeledVerdict,
+} from './confidence.js';

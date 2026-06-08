@@ -338,3 +338,28 @@ export type {
 // Judge Backends
 export { LLMJudgeBackend } from './judges/llm-judge.js';
 export type { LLMJudgeConfig } from './judges/llm-judge.js';
+
+// Confidence Labeling (Tier 3 — Meta-evaluation)
+export {
+  extractSelfReportedConfidence,
+  extractEvidenceQuality,
+  extractScoreConsistency,
+  extractBoundaryProximity,
+  extractCoverageCompleteness,
+  extractReasoningQuality,
+  assessConfidence,
+  labelVerdict,
+  ConfidenceAwareJudge,
+  toPassWithConfidence,
+  toHaveAdequateConfidence,
+  toHaveNoConfidenceFlags,
+  toNotBeOverridden,
+} from './checks/index.js';
+export type {
+  ConfidenceSignal,
+  ConfidenceSignalId,
+  ConfidenceAssessment,
+  ConfidenceRecommendation,
+  ConfidenceLabelingOptions,
+  LabeledVerdict,
+} from './checks/index.js';

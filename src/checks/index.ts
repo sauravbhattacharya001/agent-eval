@@ -275,3 +275,33 @@ export type {
   ScoringFunction,
   JudgeParseError,
 } from './judge.js';
+
+export {
+  // Hallucination detection (Tier 1+2+3)
+  extractClaims,
+  verifyClaim,
+  verifyClaims,
+  analyzeHallucination,
+  wordOverlap,
+  findBestMatch,
+  checkContradiction,
+  HALLUCINATION_RUBRIC,
+  // Assertion factories
+  toNotHallucinate,
+  toBeFullyGrounded,
+  toNotContradict,
+  toHaveHallucinationScoreBelow,
+  toHaveGroundingAbove,
+} from './hallucination.js';
+
+export type {
+  ExtractedClaim,
+  ClaimKind,
+  ClaimVerification,
+  ClaimStatus,
+  VerificationTier,
+  ClaimExtractionOptions,
+  VerificationOptions,
+  HallucinationResult,
+  HallucinationOptions,
+} from './hallucination.js';

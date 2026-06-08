@@ -8,6 +8,8 @@ export { AgentProvider, defineTool, ToolBuilder, agentContext } from './agent.js
 export type {
   AgentProviderConfig,
   LLMBackendConfig,
+  AzureOpenAIBackendConfig,
+  GeminiBackendConfig,
   ToolDefinition,
   CapturedToolCall,
   AgentTurn,

@@ -153,7 +153,7 @@ export function hashPassword(password: string): string {
 // ─── MAIN ───────────────────────────────────────────────────────────────────────
 
 // Only run if credentials are available
-if (process.env.AZURE_OPENAI_ENDPOINT && process.env.AZURE_OPENAI_API_KEY) {
+if (process.env.GEMINI_API_KEY) {
   // Standard suite
   const reporter = new TerminalReporter({ verbose: true });
   const suiteResult = await runSuite(suite, { reporters: [reporter] });
@@ -162,9 +162,7 @@ if (process.env.AZURE_OPENAI_ENDPOINT && process.env.AZURE_OPENAI_API_KEY) {
   // Tiered evaluation
   await runTieredEval();
 } else {
-  console.log('⏭️  Skipping live eval — set AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY to run');
+  console.log('⏭️  Skipping live eval — set GEMINI_API_KEY to run');
   console.log('\nExample usage:');
-  console.log('  AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com \\');
-  console.log('  AZURE_OPENAI_API_KEY=your-key \\');
-  console.log('  npx tsx examples/agent-eval-live.eval.ts');
+  console.log('  GEMINI_API_KEY=*** npx tsx examples/agent-eval-live.eval.ts');
 }

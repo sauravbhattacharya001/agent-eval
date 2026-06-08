@@ -56,6 +56,8 @@ export { AgentProvider, defineTool, ToolBuilder, agentContext } from './provider
 export type {
   AgentProviderConfig,
   LLMBackendConfig,
+  AzureOpenAIBackendConfig,
+  GeminiBackendConfig,
   ToolDefinition,
   CapturedToolCall,
   AgentTurn,

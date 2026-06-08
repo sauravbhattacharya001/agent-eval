@@ -102,9 +102,8 @@ export interface AgentProviderConfig {
   includeToolResults?: boolean;
 }
 
-/** LLM backend configuration. */
-export interface LLMBackendConfig {
-  /** Provider type. */
+/** LLM backend configuration — Azure OpenAI. */
+export interface AzureOpenAIBackendConfig {
   type: 'azure-openai';
   /** Azure OpenAI endpoint. */
   endpoint: string;
@@ -121,6 +120,24 @@ export interface LLMBackendConfig {
   /** Request timeout per LLM call in ms. Default: 60000 */
   timeoutMs?: number;
 }
+
+/** LLM backend configuration — Google Gemini. */
+export interface GeminiBackendConfig {
+  type: 'gemini';
+  /** Gemini API key. */
+  apiKey: string;
+  /** Model name. Default: gemini-2.0-flash */
+  model?: string;
+  /** Temperature. Default: 0 */
+  temperature?: number;
+  /** Max tokens per turn. */
+  maxTokens?: number;
+  /** Request timeout per LLM call in ms. Default: 60000 */
+  timeoutMs?: number;
+}
+
+/** Union of all supported LLM backend configs. */
+export type LLMBackendConfig = AzureOpenAIBackendConfig | GeminiBackendConfig;
 
 /** Chat message for multi-turn conversation. */
 interface ChatMessage {
@@ -193,7 +210,10 @@ export class AgentProvider implements EvalProvider {
   lastRun: AgentRunResult | null = null;
 
   constructor(config: AgentProviderConfig) {
-    this.name = `agent/${config.llm.deployment}`;
+    const llmName = config.llm.type === 'azure-openai'
+      ? config.llm.deployment
+      : (config.llm.model ?? 'gemini-2.0-flash');
+    this.name = `agent/${llmName}`;
     this.config = {
       maxIterations: 10,
       maxDurationMs: 120000,
@@ -430,6 +450,18 @@ export class AgentProvider implements EvalProvider {
    */
   private async callLLM(messages: ChatMessage[], options?: ProviderOptions): Promise<ChatCompletionResponse> {
     const llm = this.config.llm;
+
+    if (llm.type === 'gemini') {
+      return this.callGemini(messages, llm, options);
+    }
+
+    return this.callAzureOpenAI(messages, llm, options);
+  }
+
+  /**
+   * Call Azure OpenAI chat completions API.
+   */
+  private async callAzureOpenAI(messages: ChatMessage[], llm: AzureOpenAIBackendConfig, options?: ProviderOptions): Promise<ChatCompletionResponse> {
     const apiVersion = llm.apiVersion ?? '2024-08-01-preview';
     const url = `${llm.endpoint.replace(/\/$/, '')}/openai/deployments/${llm.deployment}/chat/completions?api-version=${apiVersion}`;
 
@@ -474,6 +506,137 @@ export class AgentProvider implements EvalProvider {
       }
 
       return (await response.json()) as ChatCompletionResponse;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  /**
+   * Call Google Gemini generateContent API with OpenAI-compatible response mapping.
+   */
+  private async callGemini(messages: ChatMessage[], llm: GeminiBackendConfig, options?: ProviderOptions): Promise<ChatCompletionResponse> {
+    const model = llm.model ?? 'gemini-2.0-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${llm.apiKey}`;
+
+    // Convert OpenAI-style messages to Gemini format
+    const systemInstruction = messages.find(m => m.role === 'system');
+    const nonSystemMessages = messages.filter(m => m.role !== 'system');
+
+    // Build Gemini tool declarations
+    const toolDeclarations = this.config.tools && this.config.tools.length > 0
+      ? [{
+          functionDeclarations: this.config.tools.map(t => ({
+            name: t.name,
+            description: t.description,
+            parameters: t.parameters,
+          })),
+        }]
+      : undefined;
+
+    // Map messages to Gemini contents format
+    const contents: Array<{ role: string; parts: Array<Record<string, unknown>> }> = [];
+    for (const msg of nonSystemMessages) {
+      if (msg.role === 'user') {
+        contents.push({ role: 'user', parts: [{ text: msg.content ?? '' }] });
+      } else if (msg.role === 'assistant') {
+        const parts: Array<Record<string, unknown>> = [];
+        if (msg.content) parts.push({ text: msg.content });
+        if (msg.tool_calls) {
+          for (const tc of msg.tool_calls) {
+            parts.push({
+              functionCall: {
+                name: tc.function.name,
+                args: JSON.parse(tc.function.arguments),
+              },
+            });
+          }
+        }
+        if (parts.length > 0) contents.push({ role: 'model', parts });
+      } else if (msg.role === 'tool') {
+        contents.push({
+          role: 'user',
+          parts: [{
+            functionResponse: {
+              name: 'tool_response',
+              response: { result: msg.content },
+            },
+          }],
+        });
+      }
+    }
+
+    const body: Record<string, unknown> = {
+      contents,
+      generationConfig: {
+        temperature: options?.temperature ?? llm.temperature ?? 0,
+        maxOutputTokens: options?.maxTokens ?? llm.maxTokens ?? 8192,
+      },
+    };
+
+    if (systemInstruction) {
+      body.systemInstruction = { parts: [{ text: systemInstruction.content }] };
+    }
+    if (toolDeclarations) body.tools = toolDeclarations;
+
+    const timeoutMs = llm.timeoutMs ?? 60000;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'unknown');
+        throw new Error(`Gemini API error ${response.status}: ${errorText}`);
+      }
+
+      const data = (await response.json()) as {
+        candidates: Array<{
+          content: { parts: Array<{ text?: string; functionCall?: { name: string; args: Record<string, unknown> } }> };
+          finishReason: string;
+        }>;
+        usageMetadata?: { promptTokenCount: number; candidatesTokenCount: number; totalTokenCount: number };
+      };
+
+      // Map Gemini response to OpenAI-compatible format
+      const candidate = data.candidates[0]!;
+      const parts = candidate.content.parts;
+
+      const textParts = parts.filter(p => p.text).map(p => p.text).join('');
+      const functionCalls = parts.filter(p => p.functionCall);
+
+      const toolCalls = functionCalls.length > 0
+        ? functionCalls.map((p, i) => ({
+            id: `call_gemini_${Date.now()}_${i}`,
+            type: 'function' as const,
+            function: {
+              name: p.functionCall!.name,
+              arguments: JSON.stringify(p.functionCall!.args),
+            },
+          }))
+        : undefined;
+
+      return {
+        choices: [{
+          message: {
+            content: textParts || null,
+            tool_calls: toolCalls,
+          },
+          finish_reason: functionCalls.length > 0 ? 'tool_calls' : 'stop',
+        }],
+        usage: data.usageMetadata
+          ? {
+              prompt_tokens: data.usageMetadata.promptTokenCount,
+              completion_tokens: data.usageMetadata.candidatesTokenCount,
+              total_tokens: data.usageMetadata.totalTokenCount,
+            }
+          : undefined,
+      };
     } finally {
       clearTimeout(timeout);
     }

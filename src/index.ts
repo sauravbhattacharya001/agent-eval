@@ -59,6 +59,7 @@ export type {
   AzureOpenAIBackendConfig,
   GeminiBackendConfig,
   GroqBackendConfig,
+  OpenRouterBackendConfig,
   ToolDefinition,
   CapturedToolCall,
   AgentTurn,

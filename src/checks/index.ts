@@ -352,6 +352,34 @@ export type {
 } from './calibration.js';
 
 export {
+  // Actionability judge (Tier 2+3 — Heuristic + Shared-Substrate Judgment)
+  detectResponseType,
+  splitIntoSentences,
+  extractActionableElements,
+  detectFiller,
+  scoreSentence,
+  analyzeActionability,
+  ACTIONABILITY_RUBRIC,
+  // Assertion factories
+  toBeActionable,
+  toHaveMinimalFiller,
+  toBeSpecific,
+  toPassActionabilityJudge,
+  toHaveActionabilityAbove,
+} from './actionability.js';
+
+export type {
+  ResponseType,
+  ActionableElement,
+  ActionableKind,
+  FillerPattern,
+  FillerKind,
+  SentenceAnalysis,
+  ActionabilityOptions,
+  ActionabilityResult,
+} from './actionability.js';
+
+export {
   // Consensus/Adversarial judging (Tier 3 — Enhanced Judgment)
   runConsensus,
   AdversarialJudge,

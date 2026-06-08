@@ -305,3 +305,40 @@ export type {
   HallucinationResult,
   HallucinationOptions,
 } from './hallucination.js';
+
+export {
+  // Calibration system (Tier 3 — Meta-evaluation)
+  calibrate,
+  buildCalibrationSet,
+  CalibrationSetBuilder,
+  CalibrationExampleBuilder,
+  detectDrift,
+} from './calibration.js';
+
+export type {
+  CalibrationExample,
+  CalibrationSet,
+  CriterionCalibration,
+  CriterionDelta,
+  CalibrationReport,
+  CalibrationOptions,
+  CalibrationSnapshot,
+  DriftResult,
+} from './calibration.js';
+
+export {
+  // Consensus/Adversarial judging (Tier 3 — Enhanced Judgment)
+  runConsensus,
+  AdversarialJudge,
+  CrossModelJudge,
+  toPassConsensusJudge,
+  toPassAdversarialJudge,
+} from './consensus.js';
+
+export type {
+  ConsensusOptions,
+  ConsensusResult,
+  CriterionAgreement,
+  AdversarialOptions,
+  CrossModelOptions,
+} from './consensus.js';

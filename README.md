@@ -72,6 +72,76 @@ const result = await runSuite(suite, { reporters: [reporter] });
 console.log(reporter.format([result]));
 ```
 
+## Tiered Runner (Cost Pyramid)
+
+Run assertions in tier order with automatic short-circuiting:
+
+```typescript
+import { runTiered, tier1, tier2, tier3 } from 'agent-eval';
+import { toBeValidJson, toBeNonEmpty } from 'agent-eval/checks';
+import { toBeRelevantTo, toNotHallucinate } from 'agent-eval/checks';
+import { toPassJudge } from 'agent-eval/checks';
+
+const result = await runTiered(output, [
+  // Tier 1 — FREE, instant (short-circuits here if failed)
+  tier1(toBeValidJson()),
+  tier1(toBeNonEmpty()),
+  // Tier 2 — ¢¢, seconds (only runs if Tier 1 passed)
+  tier2(toBeRelevantTo(task)),
+  tier2(toNotHallucinate(references)),
+  // Tier 3 — $$$, seconds (only runs if Tier 1+2 passed)
+  tier3(toPassJudge(backend, rubric)),
+]);
+
+if (!result.passed) {
+  console.log(`Caught at Tier ${result.failedAtTier} — saved $$$`);
+}
+```
+
+Options: `shortCircuit`, `skipTier3`, `maxAssertions` (cost cap).
+
+## Consensus & Adversarial Judging (Tier 3)
+
+Reduce non-determinism and positivity bias:
+
+```typescript
+import { toPassConsensusJudge, toPassAdversarialJudge } from 'agent-eval/checks';
+
+// Multi-sample median (stable scores)
+toPassConsensusJudge(backend, rubric, { samples: 5 })
+
+// Weakness-first, strict scoring, anti-injection
+toPassAdversarialJudge(backend, rubric)
+```
+
+## Judge Calibration & Drift
+
+Validate your judge against known ground truth:
+
+```typescript
+import { calibrate, buildCalibrationSet, detectDrift } from 'agent-eval/checks';
+
+const calSet = buildCalibrationSet('My Calibration', 'Code Review')
+  .example('Good review')
+    .output('The auth module has a SQL injection on line 42...')
+    .task('Review for security')
+    .scores({ actionability: 4, accuracy: 5 })
+    .verdict('pass')
+    .done()
+  .example('Vague review')
+    .output('Looks good overall.')
+    .task('Review for security')
+    .scores({ actionability: 1, accuracy: 2 })
+    .verdict('fail')
+    .done()
+  .build();
+
+const report = await calibrate(backend, rubric, calSet);
+if (!report.calibrated) {
+  console.warn(`Judge unreliable! Bias: ${report.bias}`);
+}
+```
+
 ## Assertions
 
 Built-in assertions for common checks:

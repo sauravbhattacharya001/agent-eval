@@ -255,6 +255,18 @@ export {
   toMeetAllCriteria,
   toHaveJudgeSuggestions,
   BUILTIN_RUBRICS,
+  // Calibration
+  calibrate,
+  buildCalibrationSet,
+  CalibrationSetBuilder,
+  CalibrationExampleBuilder,
+  detectDrift,
+  // Consensus & Adversarial
+  runConsensus,
+  AdversarialJudge,
+  CrossModelJudge,
+  toPassConsensusJudge,
+  toPassAdversarialJudge,
 } from './checks/index.js';
 export type {
   RubricCriterion,
@@ -272,4 +284,36 @@ export type {
   RubricValidationError,
   ScoringFunction,
   JudgeParseError,
+  // Calibration types
+  CalibrationExample,
+  CalibrationSet,
+  CriterionCalibration,
+  CriterionDelta,
+  CalibrationReport,
+  CalibrationOptions,
+  CalibrationSnapshot,
+  DriftResult,
+  // Consensus types
+  ConsensusOptions,
+  ConsensusResult,
+  CriterionAgreement,
+  AdversarialOptions,
+  CrossModelOptions,
 } from './checks/index.js';
+
+// Tiered Runner (Cost Pyramid Orchestration)
+export {
+  runTiered,
+  detectTier,
+  classifyAssertions,
+  tier1,
+  tier2,
+  tier3,
+} from './core/tiered-runner.js';
+export type {
+  Tier,
+  TieredAssertion,
+  TieredRunnerOptions,
+  TieredResult,
+  TierResult,
+} from './core/tiered-runner.js';

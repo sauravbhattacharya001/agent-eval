@@ -49,6 +49,19 @@ export { TerminalReporter, JsonReporter } from './core/reporter.js';
 export { LocalProvider } from './providers/local.js';
 export type { LocalProviderConfig } from './providers/local.js';
 
+export { AzureOpenAIProvider } from './providers/azure-openai.js';
+export type { AzureOpenAIConfig } from './providers/azure-openai.js';
+
+export { AgentProvider, defineTool, ToolBuilder, agentContext } from './providers/agent.js';
+export type {
+  AgentProviderConfig,
+  LLMBackendConfig,
+  ToolDefinition,
+  CapturedToolCall,
+  AgentTurn,
+  AgentRunResult,
+} from './providers/agent.js';
+
 // CLI utilities (for programmatic use)
 export { parseCliArgs } from './cli/args.js';
 export type { ParsedArgs } from './cli/args.js';

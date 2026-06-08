@@ -307,6 +307,31 @@ export type {
 } from './hallucination.js';
 
 export {
+  // Drift Judge (Tier 3 — Shared-Substrate Judgment)
+  decomposeTask,
+  segmentOutput,
+  mapRequirementsToSegments,
+  detectDriftIssues,
+  analyzeDrift,
+  DRIFT_RUBRIC,
+  // Assertion factories
+  toNotDrift,
+  toAddressRequirements,
+  toHaveDriftBelow,
+  toNotExhibitDrift,
+  toPassDriftJudge,
+} from './drift.js';
+
+export type {
+  TaskRequirement,
+  OutputSegment,
+  DriftKind,
+  DriftIssue,
+  DriftAnalysisOptions,
+  DriftAnalysisResult,
+} from './drift.js';
+
+export {
   // Calibration system (Tier 3 — Meta-evaluation)
   calibrate,
   buildCalibrationSet,

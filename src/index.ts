@@ -334,3 +334,7 @@ export type {
   TieredResult,
   TierResult,
 } from './core/tiered-runner.js';
+
+// Judge Backends
+export { LLMJudgeBackend } from './judges/llm-judge.js';
+export type { LLMJudgeConfig } from './judges/llm-judge.js';

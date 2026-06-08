@@ -27,6 +27,9 @@ import {
   toNotBeStale,
   toNotBeAbandoned,
   toHaveMeaningfulDiff,
+  toPassJudge,
+  BUILTIN_RUBRICS,
+  LLMJudgeBackend,
   runSuite,
   TerminalReporter,
 } from '../src/index.js';
@@ -120,6 +123,14 @@ export function hashPassword(password: string): string {
 }
   `;
 
+  // Set up the LLM judge for Tier 3
+  const judgeBackend = new LLMJudgeBackend({
+    type: 'groq',
+    apiKey: process.env.GROQ_API_KEY!,
+    model: 'llama-3.3-70b-versatile',
+  });
+  const codeReviewRubric = BUILTIN_RUBRICS.codeReview();
+
   // Run tiered assertions
   const tieredResult = await runTiered(result.output, [
     // Tier 1 — Deterministic (free, instant)
@@ -131,6 +142,9 @@ export function hashPassword(password: string): string {
     tier2(toBeRelevantTo({ task: 'security hardcoded secret hashing password vulnerability', threshold: 0.05 })),
     tier2(toNotRepeat()),
     tier2(toNotBeStale(result.timeline)),
+
+    // Tier 3 — Model-as-Judge ($$$, seconds)
+    tier3(toPassJudge(judgeBackend, codeReviewRubric)),
   ], { prompt: 'Review auth.ts for security issues' });
 
   console.log('\n=== Tiered Results ===');

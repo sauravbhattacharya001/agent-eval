@@ -68,10 +68,9 @@ const writeFile = defineTool('write_file')
 
 const provider = new AgentProvider({
   llm: {
-    type: 'azure-openai',
-    endpoint: process.env.AZURE_OPENAI_ENDPOINT ?? 'https://your-resource.openai.azure.com',
-    apiKey: process.env.AZURE_OPENAI_API_KEY ?? 'your-key',
-    deployment: process.env.AZURE_OPENAI_DEPLOYMENT ?? 'gpt-4o',
+    type: 'groq',
+    apiKey: process.env.GROQ_API_KEY ?? '',
+    model: 'llama-3.3-70b-versatile',
   },
   tools: [readFile, writeFile],
   systemPrompt: 'You are a security auditor. Review code for vulnerabilities and fix them.',
@@ -91,7 +90,7 @@ const suite = defineEval({
       assertions: [
         // These work with the standard EvalProvider interface
         toBeNonEmpty(),
-        toBeRelevantTo('security vulnerability credential password hashing'),
+        toBeRelevantTo({ task: 'security hardcoded secret hashing password vulnerability', threshold: 0.05 }),
       ],
     },
   ],
@@ -129,7 +128,7 @@ export function hashPassword(password: string): string {
     tier1(toHaveMeaningfulDiff(originalCode)),
 
     // Tier 2 — Heuristic (cheap, seconds)
-    tier2(toBeRelevantTo('security vulnerability hardcoded credential hashing')),
+    tier2(toBeRelevantTo({ task: 'security hardcoded secret hashing password vulnerability', threshold: 0.05 })),
     tier2(toNotRepeat()),
     tier2(toNotBeStale(result.timeline)),
   ], { prompt: 'Review auth.ts for security issues' });
@@ -153,7 +152,7 @@ export function hashPassword(password: string): string {
 // ─── MAIN ───────────────────────────────────────────────────────────────────────
 
 // Only run if credentials are available
-if (process.env.GEMINI_API_KEY) {
+if (process.env.GROQ_API_KEY) {
   // Standard suite
   const reporter = new TerminalReporter({ verbose: true });
   const suiteResult = await runSuite(suite, { reporters: [reporter] });
@@ -162,7 +161,7 @@ if (process.env.GEMINI_API_KEY) {
   // Tiered evaluation
   await runTieredEval();
 } else {
-  console.log('⏭️  Skipping live eval — set GEMINI_API_KEY to run');
+  console.log('⏭️  Skipping live eval — set GROQ_API_KEY to run');
   console.log('\nExample usage:');
-  console.log('  GEMINI_API_KEY=*** npx tsx examples/agent-eval-live.eval.ts');
+  console.log('  GROQ_API_KEY=*** npx tsx examples/agent-eval-live.eval.ts');
 }

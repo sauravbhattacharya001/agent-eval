@@ -58,6 +58,7 @@ export type {
   LLMBackendConfig,
   AzureOpenAIBackendConfig,
   GeminiBackendConfig,
+  GroqBackendConfig,
   ToolDefinition,
   CapturedToolCall,
   AgentTurn,

@@ -136,8 +136,23 @@ export interface GeminiBackendConfig {
   timeoutMs?: number;
 }
 
+/** LLM backend configuration — Groq (OpenAI-compatible). */
+export interface GroqBackendConfig {
+  type: 'groq';
+  /** Groq API key. */
+  apiKey: string;
+  /** Model name. Default: llama-3.3-70b-versatile */
+  model?: string;
+  /** Temperature. Default: 0 */
+  temperature?: number;
+  /** Max tokens per turn. */
+  maxTokens?: number;
+  /** Request timeout per LLM call in ms. Default: 60000 */
+  timeoutMs?: number;
+}
+
 /** Union of all supported LLM backend configs. */
-export type LLMBackendConfig = AzureOpenAIBackendConfig | GeminiBackendConfig;
+export type LLMBackendConfig = AzureOpenAIBackendConfig | GeminiBackendConfig | GroqBackendConfig;
 
 /** Chat message for multi-turn conversation. */
 interface ChatMessage {
@@ -212,6 +227,8 @@ export class AgentProvider implements EvalProvider {
   constructor(config: AgentProviderConfig) {
     const llmName = config.llm.type === 'azure-openai'
       ? config.llm.deployment
+      : config.llm.type === 'groq'
+      ? (config.llm.model ?? 'llama-3.3-70b-versatile')
       : (config.llm.model ?? 'gemini-2.0-flash');
     this.name = `agent/${llmName}`;
     this.config = {
@@ -455,6 +472,10 @@ export class AgentProvider implements EvalProvider {
       return this.callGemini(messages, llm, options);
     }
 
+    if (llm.type === 'groq') {
+      return this.callGroq(messages, llm, options);
+    }
+
     return this.callAzureOpenAI(messages, llm, options);
   }
 
@@ -503,6 +524,60 @@ export class AgentProvider implements EvalProvider {
       if (!response.ok) {
         const errorText = await response.text().catch(() => 'unknown');
         throw new Error(`Azure OpenAI API error ${response.status}: ${errorText}`);
+      }
+
+      return (await response.json()) as ChatCompletionResponse;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  /**
+   * Call Groq API (OpenAI-compatible).
+   */
+  private async callGroq(messages: ChatMessage[], llm: GroqBackendConfig, options?: ProviderOptions): Promise<ChatCompletionResponse> {
+    const model = llm.model ?? 'llama-3.3-70b-versatile';
+    const url = 'https://api.groq.com/openai/v1/chat/completions';
+
+    // Build tool definitions
+    const tools = this.config.tools && this.config.tools.length > 0
+      ? this.config.tools.map(t => ({
+          type: 'function' as const,
+          function: {
+            name: t.name,
+            description: t.description,
+            parameters: t.parameters,
+          },
+        }))
+      : undefined;
+
+    const body: Record<string, unknown> = {
+      model,
+      messages,
+      temperature: options?.temperature ?? llm.temperature ?? 0,
+    };
+
+    if (tools) body.tools = tools;
+    if (options?.maxTokens ?? llm.maxTokens) body.max_tokens = options?.maxTokens ?? llm.maxTokens;
+
+    const timeoutMs = llm.timeoutMs ?? 60000;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${llm.apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'unknown');
+        throw new Error(`Groq API error ${response.status}: ${errorText}`);
       }
 
       return (await response.json()) as ChatCompletionResponse;

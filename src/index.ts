@@ -363,3 +363,42 @@ export type {
   ConfidenceLabelingOptions,
   LabeledVerdict,
 } from './checks/index.js';
+
+// Chain Runner (Multi-step Prompt Sequences)
+export {
+  runChain,
+  StepBuilder,
+  step,
+  ChainBuilder,
+  chainBuilder,
+  defineChain,
+  previousOutput,
+  namedOutput,
+  namedOutputOr,
+  outputAt,
+  allOutputs,
+  template,
+  followUp,
+  refine,
+  validate,
+  summarizeChain,
+  setMeta,
+  getMeta,
+  incrementMeta,
+  extractJson as extractChainJson,
+  extractSection,
+  extractList,
+} from './chain/index.js';
+export type {
+  ChainContext,
+  PromptBuilder,
+  OutputTransformer,
+  GateFunction,
+  BranchTarget,
+  ChainStep,
+  ChainDefinition,
+  ChainStepStatus,
+  ChainStepResult,
+  ChainResult,
+  ChainRunnerOptions,
+} from './chain/index.js';

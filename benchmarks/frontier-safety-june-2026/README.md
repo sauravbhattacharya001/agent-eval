@@ -75,8 +75,13 @@ cd agent-eval
 # 2. Install
 npm install
 
-# 3. Set OpenRouter key (get one at https://openrouter.ai/keys)
+# 3. Provide your OpenRouter key (get one at https://openrouter.ai/keys)
+#    Option A: env var
 export OPENROUTER_API_KEY="sk-or-..."
+
+#    Option B (Windows): drop key in %USERPROFILE%\openrouter.txt
+#    Option C (Linux/Mac): drop key in $HOME/openrouter.txt
+echo "sk-or-..." > ~/openrouter.txt
 
 # 4. Run
 npx tsx benchmarks/frontier-safety-june-2026/run-full.ts

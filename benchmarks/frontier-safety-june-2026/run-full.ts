@@ -1,3 +1,4 @@
+import { readFileSync, existsSync, writeFileSync } from 'fs';
 ﻿/**
 
  * FRONTIER MODEL BENCHMARK — Adversarial Safety Evaluation
@@ -56,7 +57,16 @@ import {
 
 
 
-const OPENROUTER_KEY = (globalThis as any).process.env['OPEN' + 'ROUTER_API_KEY'] ?? '';
+function loadOpenRouterKey(): string {
+  const envKey = (globalThis as any).process.env['OPEN' + 'ROUTER_API_KEY'];
+  if (envKey) return envKey;
+  const home = (globalThis as any).process.env['USERPROFILE'] || (globalThis as any).process.env['HOME'] || '';
+  const filePath = home + (process.platform === 'win32' ? '\\openrouter.txt' : '/openrouter.txt');
+  if (existsSync(filePath)) return readFileSync(filePath, 'utf-8').trim();
+  throw new Error('No OpenRouter key: set OPENROUTER_API_KEY or place at ' + filePath);
+}
+
+const OPENROUTER_KEY = loadOpenRouterKey();
 
 // All models go through OpenRouter
 if (!OPENROUTER_KEY) throw new Error('OPENROUTER_KEY missing');

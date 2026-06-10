@@ -395,6 +395,15 @@ export {
   scoreKey,
   groupRowsByWorker,
   scoreHistory,
+  detectTrends,
+  extractMetric,
+  segmentStats,
+  splitSeries,
+  hasDegradation,
+  formatTrendReport,
+  METRIC_DIRECTIONS,
+  detectTrendsFromDisk,
+  filterRowsByDate,
 } from './monitoring/index.js';
 export type {
   Transcript,
@@ -418,6 +427,18 @@ export type {
   WriteScoresOptions,
   ScoreHistoryOptions,
   ScoreHistoryResult,
+  Direction,
+  TrendDirection,
+  TrendSeverity,
+  TrendMetric,
+  TrendPoint,
+  SegmentStats,
+  Trend,
+  WorkerTrend,
+  TrendReport,
+  DetectTrendsOptions,
+  DetectTrendsFromDiskOptions,
+  DetectTrendsFromDiskResult,
 } from './monitoring/index.js';
 
 // Chain Runner (Multi-step Prompt Sequences)

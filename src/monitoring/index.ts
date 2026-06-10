@@ -82,6 +82,38 @@ export { scoreHistory } from './score-runner.js';
 
 export type { ScoreHistoryOptions, ScoreHistoryResult } from './score-runner.js';
 
+// ─── Trend Detection (Phase 3.5) ──────────────────────────────────────────────
+
+export {
+  detectTrends,
+  extractMetric,
+  segmentStats,
+  splitSeries,
+  hasDegradation,
+  formatTrendReport,
+  METRIC_DIRECTIONS,
+} from './trend-detector.js';
+
+export type {
+  Direction,
+  TrendDirection,
+  TrendSeverity,
+  TrendMetric,
+  TrendPoint,
+  SegmentStats,
+  Trend,
+  WorkerTrend,
+  TrendReport,
+  DetectTrendsOptions,
+} from './trend-detector.js';
+
+export { detectTrendsFromDisk, filterRowsByDate } from './trend-runner.js';
+
+export type {
+  DetectTrendsFromDiskOptions,
+  DetectTrendsFromDiskResult,
+} from './trend-runner.js';
+
 export type {
   Transcript,
   TranscriptIdentity,

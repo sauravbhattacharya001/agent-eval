@@ -45,6 +45,43 @@ export { transcriptToTimeline } from './timeline-bridge.js';
 
 export type { TimelineBridgeOptions } from './timeline-bridge.js';
 
+// ─── Historical Scoring (Phase 3.5) ──────────────────────────────────────────
+
+export {
+  scoreTranscript,
+  scoreTranscripts,
+  toScoreRows,
+} from './scorer.js';
+
+export type {
+  CheckScore,
+  TranscriptScore,
+  ScoreTranscriptOptions,
+  CheckName,
+  ScoreTier,
+  ScoreStatus,
+} from './scorer.js';
+
+export {
+  scoresPathFor,
+  readScores,
+  readAllScores,
+  parseScoresJsonl,
+  serializeScoresJsonl,
+  writeScores,
+  writeScoresFor,
+  writeScoresByWorker,
+  upsertScores,
+  scoreKey,
+  groupRowsByWorker,
+} from './scores-store.js';
+
+export type { WriteScoresResult, WriteScoresOptions } from './scores-store.js';
+
+export { scoreHistory } from './score-runner.js';
+
+export type { ScoreHistoryOptions, ScoreHistoryResult } from './score-runner.js';
+
 export type {
   Transcript,
   TranscriptIdentity,

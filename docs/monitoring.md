@@ -130,7 +130,7 @@ The parser exposes its building blocks for power users:
 - `extractSections(lines)` — returns one `TranscriptSection` per `## …` heading
 - `extractListItems(body)` — numbered / bulleted lists with continuation folding
 - `parseOutcome(body)` — `'pass' | 'fail' | 'partial' | 'unknown'`
-- `parseDuration(body)` — handles `~15 minutes`, `1h 23m 4s`, `18:00 - 18:14 PT`, bare numbers
+- `parseDuration(body)` — handles `~15 minutes`, `1h 23m 4s`, `18:00 - 18:14 PT`, bare numbers. A clock-time **range** (`HH:mm … HH:mm`) wins over loose `N min` tokens, since transcripts often pair an exact headline range with approximate sub-durations.
 - `extractTranscriptReferences(sections)` — surface commit SHAs, file paths, URLs, issue numbers
 - `slugifyHeading(heading)` — deterministic section slugger
 
@@ -149,3 +149,117 @@ The parser exposes its building blocks for power users:
   pass an explicit offset for tests.
 - **No AI.** Everything in `src/monitoring/` is deterministic. Tier 2/3
   scoring of transcripts is built on top by separate modules.
+
+## Historical scoring
+
+The **historical scorer** runs the existing Tier 1 + Tier 2 checks against
+parsed transcripts and persists one score row per check to
+`transcripts/<worker>/scores.jsonl`. It is the second Phase 3.5 building block,
+layered on top of the transcript reader, and feeds the trend detector and
+weekly scorecard.
+
+It is fully offline and reproducible — **no model-as-judge**. The four checks it
+runs are exactly the ones the worker cannot forge or influence after the fact:
+
+| Check | Tier | Source check | What it measures |
+| --- | --- | --- | --- |
+| `staleness` | 1 | `detectTimeout` | Did the run finish within its timeout budget? |
+| `completeness` | 1 | `checkCompleteness` | Did it produce real deliverables vs. empty/stub output? |
+| `relevance` | 2 | `analyzeRelevance` | Does the output topic match the task (TF-IDF cosine)? |
+| `keyword-coverage` | 2 | `scoreKeywordCoverage` | Did it touch the key topics named in the task? |
+
+`relevance` and `keyword-coverage` both need a `## Task` section as the
+reference point. When a transcript has no task, those two checks are emitted
+with `status: 'skip'` and excluded from the roll-up rather than dropped — so a
+missing task never silently inflates or deflates a score.
+
+> **Independence note.** The reference point each check compares against (the
+> timeout budget, the task text, the expected-output heuristics) is something
+> the scoring layer supplies from outside the worker's control surface. The
+> worker never wrote the yardstick it is measured by.
+
+### Quick start
+
+```ts
+import { scoreHistory } from 'agent-eval';
+
+// Discover → score → persist scores.jsonl per worker.
+const result = scoreHistory('./transcripts');
+console.log(`scored ${result.scored}/${result.discovered} transcripts`);
+for (const s of result.scores) {
+  console.log(`${s.worker}/${s.runId}  overall=${s.overall.toFixed(2)}  fails=${s.failCount}`);
+}
+```
+
+Filter by worker, rolling window, explicit dates, or limit — and dry-run
+without writing:
+
+```ts
+scoreHistory('./transcripts', {
+  workers: ['sentinel'],
+  window: 7,            // trailing 7 days (or fromDate / toDate)
+  timeoutMs: { sentinel: 45 * 60_000 },
+  persist: false,      // compute only; do not touch scores.jsonl
+});
+```
+
+Re-running is **idempotent**: rows are upserted by `(worker, runId, check)`, so
+the twice-daily cron converges instead of appending duplicates.
+
+### Scoring a single transcript
+
+For ad-hoc use, score a parsed `Transcript` directly (pure, no filesystem):
+
+```ts
+import { loadTranscript, scoreTranscript } from 'agent-eval';
+
+const t = loadTranscript('./transcripts/sentinel/2026-06-08-1815.md');
+const score = scoreTranscript(t, { timeoutMs: 45 * 60_000 });
+// score.overall   — mean of non-skipped check scores (0..1)
+// score.worst     — lowest non-skipped check score
+// score.checks[]  — one CheckScore per check, each with score/status/summary
+```
+
+### API surface
+
+| Function | Module | Purpose |
+| --- | --- | --- |
+| `scoreTranscript(t, options?)` | `scorer` | Score one transcript → `TranscriptScore` (pure). |
+| `scoreTranscripts(list, options?)` | `scorer` | Score a batch in order. |
+| `toScoreRows(scores)` | `scorer` | Flatten `TranscriptScore[]` → `CheckScore[]` rows. |
+| `scoreHistory(root, options?)` | `score-runner` | Discover + load + score + persist, end to end. |
+| `readScores(path)` / `readAllScores(root, workers?)` | `scores-store` | Read rows back from JSONL. |
+| `writeScoresFor(root, rows, options?)` | `scores-store` | Write one worker's rows (upsert by default). |
+| `writeScoresByWorker(root, rows)` | `scores-store` | Fan a mixed batch out to per-worker files. |
+| `upsertScores(existing, incoming)` | `scores-store` | Merge by `(worker, runId, check)` key. |
+
+`ScoreTranscriptOptions` accepts `timeoutMs` (a single budget or a per-worker
+map), `minOutputWords`, `relevanceThreshold`, `coverageThreshold`, and `now`
+(for deterministic `scoredAt` in tests). Each surfaces as a tunable threshold
+so scoring stays explicit rather than magic.
+
+### Storage format
+
+One JSON object per line — crash-safe, greppable, cheap to append:
+
+```jsonl
+{"worker":"sentinel","runId":"2026-06-08-1815","check":"staleness","tier":1,"score":1,"status":"pass","summary":"ok (17.0m)",...}
+{"worker":"sentinel","runId":"2026-06-08-1815","check":"completeness","tier":1,"score":1,"status":"pass",...}
+```
+
+Each worker owns its own `scores.jsonl`; `writeScoresFor` throws if asked to
+write rows spanning multiple workers. Malformed or partial lines are skipped on
+read, so a half-written final line never corrupts the history.
+
+### Design notes
+
+- **Three modules, one job each.** `scorer.ts` is pure (no fs), `scores-store.ts`
+  owns JSONL persistence, and `score-runner.ts` orchestrates the pipeline. Each
+  is independently testable.
+- **Per-file failure isolation.** `scoreHistory` captures parse/score errors
+  per transcript on `result.errors` (with a `result.failed` count) — one corrupt
+  file never aborts the batch.
+- **Reuse, don't re-implement.** The scorer calls the same check functions the
+  live runner uses, so a transcript scores identically whether checked at
+  runtime or replayed from history.
+

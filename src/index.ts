@@ -364,7 +364,7 @@ export type {
   LabeledVerdict,
 } from './checks/index.js';
 
-// Production Monitoring (Phase 3.5 - Transcript Reader)
+// Production Monitoring (Phase 3.5 - Transcript Reader + Historical Scoring)
 export {
   parseTranscript,
   parseDuration,
@@ -380,6 +380,21 @@ export {
   parseTranscriptFiles,
   rollingWindow,
   transcriptToTimeline,
+  scoreTranscript,
+  scoreTranscripts,
+  toScoreRows,
+  scoresPathFor,
+  readScores,
+  readAllScores,
+  parseScoresJsonl,
+  serializeScoresJsonl,
+  writeScores,
+  writeScoresFor,
+  writeScoresByWorker,
+  upsertScores,
+  scoreKey,
+  groupRowsByWorker,
+  scoreHistory,
 } from './monitoring/index.js';
 export type {
   Transcript,
@@ -393,6 +408,16 @@ export type {
   TimelineBridgeOptions,
   WorkerName,
   OutcomeStatus,
+  CheckScore,
+  TranscriptScore,
+  ScoreTranscriptOptions,
+  CheckName,
+  ScoreTier,
+  ScoreStatus,
+  WriteScoresResult,
+  WriteScoresOptions,
+  ScoreHistoryOptions,
+  ScoreHistoryResult,
 } from './monitoring/index.js';
 
 // Chain Runner (Multi-step Prompt Sequences)

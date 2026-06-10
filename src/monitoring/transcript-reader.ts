@@ -268,10 +268,38 @@ export function parseDuration(body: string): ParsedDuration {
   const raw = body.trim();
   if (!raw) return { ms: Number.NaN, raw, exact: false };
 
-  // 1) Try explicit tokens like "1h 23m 4s", "1 h", "23 min", "5 s".
+  const lower = raw.toLowerCase();
+
+  // 1) Prefer an explicit clock-time RANGE like "19:08 PT → 19:50 PT".
+  //    A start→end range is authoritative and unambiguous. We check it before
+  //    token-summing because transcripts often pair a headline range with a
+  //    breakdown of sub-durations ("~11 min before kill", "~1 min each"), and
+  //    blindly summing every "N min" token double-counts those chunks and
+  //    overshoots the true wall-clock time. The range, by contrast, is exact.
+  const clockMatches = [...raw.matchAll(/\b(\d{1,2}):(\d{2})\b/g)];
+  if (clockMatches.length >= 2) {
+    const first = clockMatches[0];
+    const last = clockMatches[clockMatches.length - 1];
+    if (first && last) {
+      const startH = parseInt(first[1] ?? '0', 10);
+      const startM = parseInt(first[2] ?? '0', 10);
+      const endH = parseInt(last[1] ?? '0', 10);
+      const endM = parseInt(last[2] ?? '0', 10);
+      if (startH < 24 && endH < 24 && startM < 60 && endM < 60) {
+        let diffMin = endH * 60 + endM - (startH * 60 + startM);
+        if (diffMin < 0) diffMin += 24 * 60; // crossed midnight
+        if (diffMin > 0) {
+          // A clock range is exact wall-clock time; the prose "~42 minutes" that
+          // usually accompanies it is the approximation, not this.
+          return { ms: diffMin * 60_000, raw, exact: true };
+        }
+      }
+    }
+  }
+
+  // 2) Otherwise sum explicit tokens like "1h 23m 4s", "1 h", "23 min", "5 s".
   let totalMs = 0;
   let matchedAny = false;
-  const lower = raw.toLowerCase();
 
   // Hours.
   for (const m of lower.matchAll(/(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours)\b/g)) {
@@ -292,23 +320,6 @@ export function parseDuration(body: string): ParsedDuration {
   if (matchedAny && totalMs > 0) {
     const approx = /~/.test(raw) || /about\s+/i.test(raw) || /approx/i.test(raw);
     return { ms: totalMs, raw, exact: !approx };
-  }
-
-  // 2) Try clock-time diff: "HH:mm ... HH:mm" (with optional "PT").
-  const clockMatches = [...raw.matchAll(/\b(\d{1,2}):(\d{2})\b/g)];
-  if (clockMatches.length >= 2) {
-    const first = clockMatches[0]!;
-    const last = clockMatches[clockMatches.length - 1]!;
-    const startH = parseInt(first[1] ?? '0', 10);
-    const startM = parseInt(first[2] ?? '0', 10);
-    const endH = parseInt(last[1] ?? '0', 10);
-    const endM = parseInt(last[2] ?? '0', 10);
-    let diffMin = endH * 60 + endM - (startH * 60 + startM);
-    if (diffMin < 0) diffMin += 24 * 60; // crossed midnight
-    if (diffMin > 0) {
-      const approx = /~/.test(raw) || /about/i.test(raw);
-      return { ms: diffMin * 60_000, raw, exact: !approx };
-    }
   }
 
   // 3) Bare number → assume minutes, the most common unit in our transcripts.

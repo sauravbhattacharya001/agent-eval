@@ -114,6 +114,33 @@ export type {
   DetectTrendsFromDiskResult,
 } from './trend-runner.js';
 
+// ─── Weekly Scorecard (Phase 3.5) ─────────────────────────────────────────────
+
+export {
+  aggregateScorecard,
+  formatScorecard,
+  formatScorecardMarkdown,
+} from './scorecard.js';
+
+export type {
+  Scorecard,
+  WorkerScorecard,
+  ScorecardTotals,
+  ScorecardTrend,
+  CheckBreakdown,
+  FailureCategory,
+  HealthGrade,
+  TrendArrow,
+  AggregateScorecardOptions,
+} from './scorecard.js';
+
+export { buildScorecard } from './scorecard-runner.js';
+
+export type {
+  BuildScorecardOptions,
+  BuildScorecardResult,
+} from './scorecard-runner.js';
+
 export type {
   Transcript,
   TranscriptIdentity,

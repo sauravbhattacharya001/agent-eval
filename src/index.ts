@@ -404,6 +404,10 @@ export {
   METRIC_DIRECTIONS,
   detectTrendsFromDisk,
   filterRowsByDate,
+  aggregateScorecard,
+  formatScorecard,
+  formatScorecardMarkdown,
+  buildScorecard,
 } from './monitoring/index.js';
 export type {
   Transcript,
@@ -439,6 +443,17 @@ export type {
   DetectTrendsOptions,
   DetectTrendsFromDiskOptions,
   DetectTrendsFromDiskResult,
+  Scorecard,
+  WorkerScorecard,
+  ScorecardTotals,
+  ScorecardTrend,
+  CheckBreakdown,
+  FailureCategory,
+  HealthGrade,
+  TrendArrow,
+  AggregateScorecardOptions,
+  BuildScorecardOptions,
+  BuildScorecardResult,
 } from './monitoring/index.js';
 
 // Chain Runner (Multi-step Prompt Sequences)

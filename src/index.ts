@@ -364,6 +364,37 @@ export type {
   LabeledVerdict,
 } from './checks/index.js';
 
+// Production Monitoring (Phase 3.5 - Transcript Reader)
+export {
+  parseTranscript,
+  parseDuration,
+  parseOutcome,
+  extractTitle,
+  extractSections,
+  extractListItems,
+  extractReferences as extractTranscriptReferences,
+  slugifyHeading,
+  discoverTranscripts,
+  loadTranscript,
+  loadTranscripts,
+  parseTranscriptFiles,
+  rollingWindow,
+  transcriptToTimeline,
+} from './monitoring/index.js';
+export type {
+  Transcript,
+  TranscriptIdentity,
+  TranscriptSection,
+  TranscriptReference,
+  TranscriptFile,
+  ParsedDuration,
+  ParseTranscriptOptions,
+  DiscoveryOptions,
+  TimelineBridgeOptions,
+  WorkerName,
+  OutcomeStatus,
+} from './monitoring/index.js';
+
 // Chain Runner (Multi-step Prompt Sequences)
 export {
   runChain,

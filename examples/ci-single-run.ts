@@ -8,11 +8,15 @@
  * output it produced, and it writes the GitHub Action outputs + step summary and
  * exits non-zero when the run failed to address the prompt.
  *
- * The checks are Tier 1 (completeness) + Tier 2 (keyword coverage) only — no LLM
- * calls, no API keys, fully offline and reproducible.
+ * The checks are Tier 1 (completeness) + Tier 2 (keyword coverage + relevance)
+ * only — no LLM calls, no API keys, fully offline and reproducible. Coverage and
+ * relevance are duals: coverage is recall ("did the output mention the prompt's
+ * topics?"), relevance is precision ("is the output *about* THIS PR, or generic
+ * advice?").
  *
  * Usage:
- *   # Built-in demo: a good review (passes) vs. boilerplate posted verbatim (fails)
+ *   # Built-in demo: a good review (passes), boilerplate posted verbatim (fails),
+ *   # and generic best-practices advice that ignores the diff (fails on relevance)
  *   npx tsx examples/ci-single-run.ts
  *
  *   # Real inputs from files:
@@ -21,6 +25,8 @@
  * Configuration (env, all optional):
  *   AGENT_EVAL_COVERAGE   min prompt-topic coverage [0,1] to pass   (default: 0.4)
  *   AGENT_EVAL_IGNORED    coverage at/under this hard-fails the run (default: 0.15)
+ *   AGENT_EVAL_RELEVANCE  min prompt similarity [0,1] to pass       (default: 0.2)
+ *   AGENT_EVAL_OFFTOPIC   similarity at/under this hard-fails       (default: 0.08)
  *   AGENT_EVAL_WORKER     logical run name shown in outputs/summary (default: ci-run)
  *   AGENT_EVAL_TITLE      step-summary heading                      (default: PR Review Eval)
  */
@@ -59,17 +65,31 @@ committing and follow the existing code style. Open a pull request against main,
 make sure all tests pass, and a maintainer will review your changes. Be kind and
 welcoming. We hope this helps and you enjoy contributing here.`;
 
+// The subtler failure mode: substantive, well-formed prose that is generic
+// best-practices advice rather than a review of THIS PR. Completeness passes
+// (it is non-empty, structured) and it even brushes the prompt's words — but it
+// is off-topic, which the relevance check (precision) is what catches.
+const DEMO_OFFTOPIC_OUTPUT = `Thanks for the pull request. Here is some general
+advice for any change: always write clear, descriptive commit messages, document
+your code thoroughly, and add unit tests to keep coverage high. Follow the SOLID
+principles, keep functions small and focused, and run the linter and formatter
+before pushing. Review your own diff first, be kind in discussions, and keep your
+dependencies up to date. Good habits like these make any codebase healthier and
+easier to maintain for the whole team over time.`;
+
 function main(): void {
   const worker = process.env.AGENT_EVAL_WORKER ?? 'ci-run';
   const title = process.env.AGENT_EVAL_TITLE ?? 'PR Review Eval';
   const coverageThreshold = parseNumber(process.env.AGENT_EVAL_COVERAGE);
   const ignoredPromptThreshold = parseNumber(process.env.AGENT_EVAL_IGNORED);
+  const relevanceThreshold = parseNumber(process.env.AGENT_EVAL_RELEVANCE);
+  const offTopicThreshold = parseNumber(process.env.AGENT_EVAL_OFFTOPIC);
 
   const promptFile = process.argv[2];
   const outputFile = process.argv[3];
 
   // With file arguments, evaluate the real run. Without, run the built-in demo
-  // (both the good and the bad output) so the example is self-contained.
+  // (good, boilerplate, and off-topic outputs) so the example is self-contained.
   if (promptFile && outputFile) {
     const prompt = readFileSync(promptFile, 'utf8');
     const output = readFileSync(outputFile, 'utf8');
@@ -79,6 +99,8 @@ function main(): void {
       worker,
       ...(coverageThreshold !== undefined ? { coverageThreshold } : {}),
       ...(ignoredPromptThreshold !== undefined ? { ignoredPromptThreshold } : {}),
+      ...(relevanceThreshold !== undefined ? { relevanceThreshold } : {}),
+      ...(offTopicThreshold !== undefined ? { offTopicThreshold } : {}),
     });
     console.log(`agent-eval: ${evaluation.headline}`);
     for (const e of evaluation.evidence) console.log(`  - ${e.message}`);
@@ -86,13 +108,14 @@ function main(): void {
     return;
   }
 
-  // Demo mode — show both verdicts, then exit on the "bad" one to demonstrate a
+  // Demo mode — show all verdicts, then exit on a failing one to demonstrate a
   // failing gate.
   console.log('No prompt/output files given — running the built-in demo.\n');
 
   for (const [label, output] of [
     ['GOOD review (addresses the diff)', DEMO_GOOD_OUTPUT],
     ['BAD output (contributing guide posted verbatim)', DEMO_BAD_OUTPUT],
+    ['OFF-TOPIC output (generic best-practices advice)', DEMO_OFFTOPIC_OUTPUT],
   ] as const) {
     const { evaluation, checks } = evaluateCiRun({
       prompt: DEMO_PROMPT,
@@ -100,6 +123,8 @@ function main(): void {
       worker,
       ...(coverageThreshold !== undefined ? { coverageThreshold } : {}),
       ...(ignoredPromptThreshold !== undefined ? { ignoredPromptThreshold } : {}),
+      ...(relevanceThreshold !== undefined ? { relevanceThreshold } : {}),
+      ...(offTopicThreshold !== undefined ? { offTopicThreshold } : {}),
     });
     console.log(`── ${label}`);
     console.log(`   ${evaluation.headline}`);
@@ -109,8 +134,10 @@ function main(): void {
     console.log('');
   }
 
-  // Gate on the bad run so the example exits non-zero (what CI would do).
-  const { evaluation } = evaluateCiRun({ prompt: DEMO_PROMPT, output: DEMO_BAD_OUTPUT, worker });
+  // Gate on the off-topic run so the example exits non-zero (what CI would do).
+  // It is the most interesting failure: completeness passes, but it is not about
+  // this PR — exactly what a crash check (exit 0) cannot see.
+  const { evaluation } = evaluateCiRun({ prompt: DEMO_PROMPT, output: DEMO_OFFTOPIC_OUTPUT, worker });
   process.exitCode = emitActionResult(evaluation, { title });
 }
 

@@ -25,6 +25,14 @@
  *   - **Keyword coverage** (Tier 2, {@link scoreKeywordCoverage}): the *prompt*
  *     supplies the reference topics, and the agent never wrote the prompt. The
  *     agent cannot grade its own coverage because it didn't author the baseline.
+ *   - **Relevance** (Tier 2, {@link analyzeRelevance}): the *dual* of coverage.
+ *     Coverage is recall ("did the output mention what the prompt asked?");
+ *     relevance is precision ("is the output *spending its words on* the prompt,
+ *     or on generic advice / boilerplate filler?"). It is the exact tell for an
+ *     output that name-drops the prompt's keywords but is mostly about something
+ *     else — "is this review about THIS PR, not generic advice?" The prompt is,
+ *     again, a reference the agent never authored, and TF-IDF cosine similarity
+ *     is computed from the byte content, not from anything the agent controls.
  * No model-as-judge, offline, reproducible.
  *
  * The result is the **same** {@link ActionEvaluation} shape the fleet adapter
@@ -54,6 +62,11 @@ import {
   type KeywordCoverageScoringOptions,
   type TopicGapResult,
 } from '../checks/keyword-coverage.js';
+import {
+  analyzeRelevance,
+  type RelevanceOptions,
+  type RelevanceResult,
+} from '../checks/relevance.js';
 import { aggregateScorecard } from '../monitoring/scorecard.js';
 import type { CheckScore, TranscriptScore } from '../monitoring/scorer.js';
 
@@ -68,7 +81,7 @@ export type CiCheckStatus = 'pass' | 'fail' | 'warn';
 /** One scored check for a single CI run. */
 export interface CiCheckResult {
   /** Which check produced this (one of the canonical scorer check names). */
-  check: 'completeness' | 'keyword-coverage';
+  check: 'completeness' | 'keyword-coverage' | 'relevance';
   /** Independence tier: 1 = deterministic, 2 = heuristic. */
   tier: 1 | 2;
   /** Normalized score in [0, 1], 1 = best. */
@@ -104,10 +117,26 @@ export interface EvaluateCiRunOptions {
    * essentially unrelated to the task (e.g. boilerplate posted verbatim).
    */
   ignoredPromptThreshold?: number;
+  /**
+   * Minimum relevance (TF-IDF cosine similarity between prompt and output) in
+   * [0, 1] to pass the relevance check. Default: 0.2 — the same default the
+   * Tier 2 relevance assertion uses. Below this the output is mostly *not about*
+   * the prompt (generic advice / boilerplate that happens to be present).
+   */
+  relevanceThreshold?: number;
+  /**
+   * At/under this relevance score the run is a hard failure to be *about* the
+   * prompt (not just a warning). Default: 0.08 — at this level the output and
+   * the prompt share almost no weighted vocabulary, i.e. the output is generic
+   * filler unrelated to THIS task.
+   */
+  offTopicThreshold?: number;
   /** Extra completeness options forwarded to {@link checkCompleteness}. */
   completenessOptions?: CompletenessOptions;
   /** Extra keyword-coverage options forwarded to {@link scoreKeywordCoverage}. */
   keywordOptions?: KeywordCoverageScoringOptions;
+  /** Extra relevance options forwarded to {@link analyzeRelevance}. */
+  relevanceOptions?: RelevanceOptions;
   /** Gate / no-data / score-floor options for the final {@link evaluateForAction}. */
   action?: EvaluateForActionOptions;
   /** Override the timestamp recorded on the synthetic score (testing). */
@@ -130,6 +159,8 @@ export interface CiRunEvaluation {
   coverage: KeywordCoverageScore;
   /** The Tier 2 topic-gap analysis (which important topics were missed). */
   gaps: TopicGapResult;
+  /** The Tier 2 relevance analysis (precision: is the output *about* the prompt?). */
+  relevance: RelevanceResult;
 }
 
 // ─── CONSTANTS ──────────────────────────────────────────────────────────────────
@@ -137,6 +168,8 @@ export interface CiRunEvaluation {
 const DEFAULT_WORKER = 'ci-run';
 const DEFAULT_COVERAGE_THRESHOLD = 0.4;
 const DEFAULT_IGNORED_PROMPT_THRESHOLD = 0.15;
+const DEFAULT_RELEVANCE_THRESHOLD = 0.2;
+const DEFAULT_OFF_TOPIC_THRESHOLD = 0.08;
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────────
 
@@ -241,6 +274,77 @@ function scoreCoverage(
   };
 }
 
+/**
+ * Score the Tier 2 relevance check into a single-run result. This is the *dual*
+ * of keyword coverage: coverage asks "did the output mention the prompt's
+ * topics?" (recall), relevance asks "is the output *about* the prompt, or is it
+ * generic filler?" (precision). The primary signal is TF-IDF cosine similarity
+ * between prompt and output ({@link analyzeRelevance}); we also surface a
+ * precision proxy — of the output's most distinctive terms, the fraction that
+ * overlap the prompt rather than being off-topic "extra" terms — as supporting
+ * evidence, plus the dominant off-topic terms themselves.
+ *
+ * At/under `offTopicThreshold` the output is essentially unrelated to the prompt
+ * (hard `fail`); between that and `relevanceThreshold` it is a `warn` (drifting /
+ * padded with generic advice); at/above it `pass`. An empty prompt or output is
+ * unmeasurable and treated as a `pass` (completeness already catches the empty
+ * output; an empty prompt is the caller's bug, not the agent's).
+ */
+function scoreRelevance(
+  relevance: RelevanceResult,
+  relevanceThreshold: number,
+  offTopicThreshold: number,
+): CiCheckResult {
+  const score = round4(relevance.score);
+
+  // Precision proxy from term *counts* (not weights — shared/extra weights live
+  // on different scales in RelevanceResult, so a weight ratio is not comparable).
+  // Of the output's distinctive terms (shared-with-prompt + off-topic extras),
+  // what fraction overlap the prompt? Low = the output's vocabulary is off-topic.
+  const sharedCount = relevance.sharedTerms.length;
+  const extraCount = relevance.extraTerms.length;
+  const distinctive = sharedCount + extraCount;
+  const precision = distinctive > 0 ? round4(sharedCount / distinctive) : 0;
+
+  // Unmeasurable (empty prompt or output) -> nothing to judge here.
+  const measurable = sharedCount + relevance.missingTerms.length > 0;
+
+  let status: CiCheckStatus;
+  if (!measurable) {
+    status = 'pass';
+  } else if (score <= offTopicThreshold) {
+    status = 'fail';
+  } else if (score < relevanceThreshold) {
+    status = 'warn';
+  } else {
+    status = 'pass';
+  }
+
+  const offTopic = relevance.extraTerms.slice(0, 5).map((t) => t.term).filter(Boolean);
+  const summary = !measurable
+    ? 'not measurable (empty prompt or output)'
+    : status === 'pass'
+      ? `on-topic: ${(score * 100).toFixed(0)}% similarity to prompt`
+      : status === 'fail'
+        ? `off-topic: ${(score * 100).toFixed(0)}% similarity${offTopic.length ? `, dominated by ${offTopic.join(', ')}` : ''}`
+        : `drifting: ${(score * 100).toFixed(0)}% similarity${offTopic.length ? `, off-topic terms ${offTopic.join(', ')}` : ''}`;
+
+  return {
+    check: 'relevance',
+    tier: 2,
+    score,
+    status,
+    summary,
+    detail: {
+      similarity: score,
+      precision,
+      sharedTerms: sharedCount,
+      extraTerms: extraCount,
+      missingTerms: relevance.missingTerms.length,
+    },
+  };
+}
+
 /** Map a single-run {@link CiCheckResult} to a scorecard {@link CheckScore} row. */
 function toCheckScore(
   c: CiCheckResult,
@@ -277,9 +381,17 @@ function toCheckScore(
  */
 export function scoreCiRun(
   options: EvaluateCiRunOptions,
-): { checks: CiCheckResult[]; completeness: CompletenessResult; coverage: KeywordCoverageScore; gaps: TopicGapResult } {
+): {
+  checks: CiCheckResult[];
+  completeness: CompletenessResult;
+  coverage: KeywordCoverageScore;
+  gaps: TopicGapResult;
+  relevance: RelevanceResult;
+} {
   const coverageThreshold = options.coverageThreshold ?? DEFAULT_COVERAGE_THRESHOLD;
   const ignoredPromptThreshold = options.ignoredPromptThreshold ?? DEFAULT_IGNORED_PROMPT_THRESHOLD;
+  const relevanceThreshold = options.relevanceThreshold ?? DEFAULT_RELEVANCE_THRESHOLD;
+  const offTopicThreshold = options.offTopicThreshold ?? DEFAULT_OFF_TOPIC_THRESHOLD;
 
   // Tier 1 — structural completeness of the agent's own output.
   const completeness = checkCompleteness(options.output, options.completenessOptions);
@@ -293,12 +405,21 @@ export function scoreCiRun(
   const coverage = scoreKeywordCoverage(options.prompt, options.output, keywordOpts);
   const gaps = identifyTopicGaps(options.prompt, options.output, keywordOpts);
 
+  // Tier 2 — relevance is the dual of coverage: is the output *about* the prompt
+  // (precision), not just touching its keywords? Same prompt-as-reference logic.
+  const relevanceOpts: RelevanceOptions = {
+    threshold: relevanceThreshold,
+    ...options.relevanceOptions,
+  };
+  const relevance = analyzeRelevance(options.prompt, options.output, relevanceOpts);
+
   const checks: CiCheckResult[] = [
     scoreCompleteness(completeness),
     scoreCoverage(coverage, gaps, coverageThreshold, ignoredPromptThreshold),
+    scoreRelevance(relevance, relevanceThreshold, offTopicThreshold),
   ];
 
-  return { checks, completeness, coverage, gaps };
+  return { checks, completeness, coverage, gaps, relevance };
 }
 
 /**
@@ -322,7 +443,7 @@ export function evaluateCiRun(options: EvaluateCiRunOptions): CiRunEvaluation {
   const startedAtMs = now.getTime();
   const runId = startedAt.replace(/[:.]/g, '-');
 
-  const { checks, completeness, coverage, gaps } = scoreCiRun(options);
+  const { checks, completeness, coverage, gaps, relevance } = scoreCiRun(options);
 
   // Build the synthetic per-transcript score (the roll-up the scorecard expects).
   const checkScores = checks.map((c) =>
@@ -358,5 +479,5 @@ export function evaluateCiRun(options: EvaluateCiRunOptions): CiRunEvaluation {
   };
   const evaluation = evaluateForAction(scorecard, actionOptions);
 
-  return { evaluation, checks, completeness, coverage, gaps };
+  return { evaluation, checks, completeness, coverage, gaps, relevance };
 }

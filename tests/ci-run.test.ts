@@ -75,6 +75,42 @@ maintainer will review your changes. Be patient and respectful in discussions.
 
 Be kind. Be welcoming. We hope this helps and you enjoy contributing here.`;
 
+// Generic-advice failure mode: an output that is *about* software best practices
+// in general, not about THIS PR. It barely overlaps the prompt's vocabulary, so
+// it is off-topic even though it is well-formed, substantive prose.
+const GENERIC_ADVICE = `Thank you for the contribution. Here are some general
+best practices to keep in mind for any pull request:
+
+- Always write clear, descriptive commit messages.
+- Make sure your code is well documented with comments.
+- Add unit tests for new functionality and keep coverage high.
+- Follow the SOLID principles and keep functions small and focused.
+- Be mindful of code style; run the linter and formatter before pushing.
+- Review your own diff before requesting a review from others.
+- Keep dependencies up to date and avoid introducing unnecessary libraries.
+- Write helpful documentation so future maintainers understand the design.
+
+Following these conventions will make the project easier to maintain for
+everyone. Great teamwork makes the codebase healthier over time.`;
+
+// The subtler failure relevance catches that coverage alone misses: the output
+// name-drops the prompt's keywords once, then pads with ~80% generic filler.
+// Coverage sees the keywords (partial recall); relevance sees that most of the
+// content is off-topic (low precision -> drifting).
+const PADDED_OUTPUT = `Thanks for the pull request on rate limiting, the token
+bucket, the Redis cache key expiry, and race conditions in the login endpoint.
+
+Now, here is some general advice for writing great software. Always remember to
+keep your functions small and focused. Write clear and descriptive commit
+messages so your teammates understand the history. Documentation is incredibly
+important; comment your code thoroughly and keep the README up to date. Make
+sure you add plenty of unit tests and integration tests to keep coverage high.
+Follow the SOLID principles and favour composition over inheritance. Use a
+consistent code style and run the linter and formatter before every push.
+Review your own changes carefully, be kind in code review discussions, and
+always be welcoming to newcomers. Keep dependencies minimal and up to date.
+Great teamwork and good habits make any codebase healthier over time.`;
+
 // ─── scoreCiRun — completeness check (Tier 1) ────────────────────────────────────
 
 describe('scoreCiRun — completeness (Tier 1)', () => {
@@ -173,6 +209,88 @@ describe('scoreCiRun — keyword coverage (Tier 2)', () => {
   });
 });
 
+// ─── scoreCiRun — relevance (Tier 2) ─────────────────────────────────────────────
+
+describe('scoreCiRun — relevance (Tier 2)', () => {
+  it('passes a review that is about the PR', () => {
+    const { checks } = scoreCiRun({ prompt: REVIEW_PROMPT, output: GOOD_REVIEW });
+    const relevance = checks.find((c) => c.check === 'relevance');
+    expect(relevance).toBeDefined();
+    expect(relevance?.tier).toBe(2);
+    expect(relevance?.status).toBe('pass');
+    expect(relevance?.score).toBeGreaterThanOrEqual(0.2);
+    expect(relevance?.summary).toContain('on-topic');
+  });
+
+  it('fails generic advice that is not about THIS PR', () => {
+    const { checks, relevance } = scoreCiRun({
+      prompt: REVIEW_PROMPT,
+      output: GENERIC_ADVICE,
+    });
+    const c = checks.find((x) => x.check === 'relevance');
+    // Well-formed prose, but its vocabulary is generic best-practices, not the
+    // prompt's token-bucket / Redis / race-condition topics.
+    expect(c?.status).toBe('fail');
+    expect(c?.summary.toLowerCase()).toContain('off-topic');
+    // The off-topic terms that dominate the output are surfaced as evidence.
+    expect(relevance.extraTerms.length).toBeGreaterThan(0);
+  });
+
+  it('catches padded output that coverage alone would only warn on (precision vs recall)', () => {
+    const { checks } = scoreCiRun({ prompt: REVIEW_PROMPT, output: PADDED_OUTPUT });
+    const relevance = checks.find((c) => c.check === 'relevance');
+    const coverage = checks.find((c) => c.check === 'keyword-coverage');
+    // Coverage sees the name-dropped keywords -> it is NOT a hard ignore.
+    expect(coverage?.status).not.toBe('fail');
+    // Relevance sees that most of the content is off-topic filler -> drifting.
+    expect(relevance?.status).toBe('warn');
+    expect(relevance?.summary.toLowerCase()).toContain('drifting');
+    // The two checks genuinely diverge: this is the value relevance adds.
+    expect(relevance?.score).toBeLessThan(coverage?.score ?? 1);
+  });
+
+  it('hard-fails at/under the off-topic threshold', () => {
+    const { checks } = scoreCiRun({
+      prompt: REVIEW_PROMPT,
+      output: GOOD_REVIEW,
+      // Force even the good review under the off-topic line regardless of score.
+      offTopicThreshold: 0.99,
+    });
+    const c = checks.find((x) => x.check === 'relevance');
+    expect(c?.status).toBe('fail');
+  });
+
+  it('warns when relevance lands between the off-topic and pass thresholds', () => {
+    const { checks } = scoreCiRun({
+      prompt: REVIEW_PROMPT,
+      output: GOOD_REVIEW,
+      // Pass bar above the good review's actual similarity, off-topic line below.
+      relevanceThreshold: 0.99,
+      offTopicThreshold: 0.05,
+    });
+    const c = checks.find((x) => x.check === 'relevance');
+    expect(c?.status).toBe('warn');
+  });
+
+  it('exposes a precision proxy and term counts in detail', () => {
+    const { checks } = scoreCiRun({ prompt: REVIEW_PROMPT, output: GOOD_REVIEW });
+    const c = checks.find((x) => x.check === 'relevance');
+    expect(typeof c?.detail?.similarity).toBe('number');
+    expect(typeof c?.detail?.precision).toBe('number');
+    expect(c?.detail?.precision).toBeGreaterThanOrEqual(0);
+    expect(c?.detail?.precision).toBeLessThanOrEqual(1);
+    expect(typeof c?.detail?.sharedTerms).toBe('number');
+    expect(typeof c?.detail?.extraTerms).toBe('number');
+  });
+
+  it('treats an empty prompt as not-measurable and passes (no false off-topic)', () => {
+    const { checks } = scoreCiRun({ prompt: '   ', output: GOOD_REVIEW });
+    const c = checks.find((x) => x.check === 'relevance');
+    expect(c?.status).toBe('pass');
+    expect(c?.summary.toLowerCase()).toContain('not measurable');
+  });
+});
+
 // ─── evaluateCiRun — end to end ──────────────────────────────────────────────────
 
 describe('evaluateCiRun — end to end', () => {
@@ -194,10 +312,11 @@ describe('evaluateCiRun — end to end', () => {
     expect(card.workers[0]?.runs).toBe(1);
     expect(card.totals.runs).toBe(1);
 
-    // Both checks present in the verdict path.
+    // All three checks present in the verdict path.
     expect(result.checks.map((c) => c.check).sort()).toEqual([
       'completeness',
       'keyword-coverage',
+      'relevance',
     ]);
   });
 
@@ -216,6 +335,23 @@ describe('evaluateCiRun — end to end', () => {
     expect(result.evaluation.exitCode).toBe(1);
     expect(result.evaluation.failingWorkers).toBe(1);
     expect(result.evaluation.evidence.length).toBeGreaterThan(0);
+  });
+
+  it('fails a run that is off-topic to the prompt (relevance trips the gate)', () => {
+    // Generic best-practices advice: well-formed and non-empty (completeness
+    // passes) but not about THIS PR. Relevance is the check that catches it.
+    const result = evaluateCiRun({
+      prompt: REVIEW_PROMPT,
+      output: GENERIC_ADVICE,
+      worker: 'claude-review',
+      now: FIXED_NOW,
+    });
+    expect(result.evaluation.passed).toBe(false);
+    expect(result.evaluation.exitCode).toBe(1);
+    expect(result.evaluation.failingWorkers).toBe(1);
+    // The relevance check is the (or a) reason — it fails on this output.
+    const relevance = result.checks.find((c) => c.check === 'relevance');
+    expect(relevance?.status).toBe('fail');
   });
 
   it('fails an empty run', () => {
@@ -311,6 +447,9 @@ describe('evaluateCiRun — end to end', () => {
     expect(result.coverage.totalKeywords).toBeGreaterThan(0);
     // The boilerplate misses the prompt's real topics -> non-trivial gaps.
     expect(result.gaps.gapCount).toBeGreaterThan(0);
+    // The raw relevance analysis is exposed too (similarity + off-topic terms).
+    expect(typeof result.relevance.score).toBe('number');
+    expect(result.relevance.extraTerms.length).toBeGreaterThan(0);
   });
 
   it('is deterministic — same inputs produce the same verdict and score', () => {

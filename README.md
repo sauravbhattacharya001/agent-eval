@@ -508,26 +508,40 @@ const { evaluation } = evaluateCiRun({
 process.exitCode = emitActionResult(evaluation);  // outputs + summary + exit
 ```
 
-It runs two independent checks, no model-as-judge:
+It runs three independent checks, no model-as-judge:
 
 - **Completeness** (Tier 1) — is the output non-empty, substantive, and not a
   stub / truncated / refusal? The bytes are the bytes; the agent can't forge
   "non-empty".
 - **Keyword coverage** (Tier 2) — does the output cover the topics the *prompt*
-  asked about? The prompt is the reference the agent never authored, so it can't
-  grade its own coverage. Coverage at/under `ignoredPromptThreshold` is a hard
-  fail — this is the *"posted the guidance file verbatim instead of a review"*
-  failure mode.
+  asked about? (recall) The prompt is the reference the agent never authored, so
+  it can't grade its own coverage. Coverage at/under `ignoredPromptThreshold` is
+  a hard fail — this is the *"posted the guidance file verbatim instead of a
+  review"* failure mode.
+- **Relevance** (Tier 2) — the *dual* of coverage: is the output *about* THIS
+  PR, or generic advice? (precision) It uses TF-IDF cosine similarity between
+  prompt and output, so it catches the subtler case coverage misses — an output
+  that name-drops the prompt's keywords but is mostly off-topic filler
+  ("drifting"). Similarity at/under `offTopicThreshold` is a hard fail.
 
 | Knob | Meaning |
 |------|---------|
 | `coverageThreshold` | Min prompt-topic coverage `[0,1]` to pass (default `0.4`) |
 | `ignoredPromptThreshold` | At/under this coverage the run hard-fails as "ignored the prompt" (default `0.15`) |
+| `relevanceThreshold` | Min prompt similarity `[0,1]` to pass the relevance check (default `0.2`) |
+| `offTopicThreshold` | At/under this similarity the run hard-fails as off-topic (default `0.08`) |
 | `worker` | Logical name for the run (shown in outputs/summary; default `ci-run`) |
 | `action` | `gate` / `minScore` / `noData` forwarded to the gate (default gate `watch`) |
 
+Why both coverage *and* relevance? They are recall vs. precision and they
+genuinely diverge: an output that lists the prompt's keywords once then pads with
+80% generic best-practices advice **passes coverage** (the topics are present)
+but **fails relevance** (most of the content is off-topic). Either failing trips
+the gate.
+
 See [`examples/ci-single-run.ts`](examples/ci-single-run.ts) for a runnable
-example (good review passes, boilerplate-posted-verbatim fails).
+example (good review passes; boilerplate-posted-verbatim and generic-advice
+outputs fail).
 
 ## License
 

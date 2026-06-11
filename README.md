@@ -508,7 +508,7 @@ const { evaluation } = evaluateCiRun({
 process.exitCode = emitActionResult(evaluation);  // outputs + summary + exit
 ```
 
-It runs three independent checks, no model-as-judge:
+It runs four independent checks, no model-as-judge:
 
 - **Completeness** (Tier 1) — is the output non-empty, substantive, and not a
   stub / truncated / refusal? The bytes are the bytes; the agent can't forge
@@ -523,6 +523,17 @@ It runs three independent checks, no model-as-judge:
   prompt and output, so it catches the subtler case coverage misses — an output
   that name-drops the prompt's keywords but is mostly off-topic filler
   ("drifting"). Similarity at/under `offTopicThreshold` is a hard fail.
+- **Staleness** (Tier 1) — the *no-op* detector: did the run emit anything a
+  human can **act on**? An output can be complete, cover the topics, and be
+  perfectly on-topic and *still* say nothing useful — the review that sits stale
+  with no actionable output, the check abandoned mid-task, the prior comment
+  reposted verbatim. The detector counts *concrete actionable artifacts* the
+  agent produced — file references, line numbers, code suggestions, actionable
+  directives, structured findings — and flags bare acknowledgements ("LGTM"),
+  truncation, verbatim reposts (pass `previousOutput`), and timeouts (pass a
+  `timeline`). It is presence-counting over artifacts, never a quality
+  judgement: it asks *"is there anything to act on?"*, never *"is it good?"* — so
+  it stays Tier 1 (deterministic, forgery-resistant), not model-as-judge.
 
 | Knob | Meaning |
 |------|---------|
@@ -530,18 +541,29 @@ It runs three independent checks, no model-as-judge:
 | `ignoredPromptThreshold` | At/under this coverage the run hard-fails as "ignored the prompt" (default `0.15`) |
 | `relevanceThreshold` | Min prompt similarity `[0,1]` to pass the relevance check (default `0.2`) |
 | `offTopicThreshold` | At/under this similarity the run hard-fails as off-topic (default `0.08`) |
+| `minActionableArtifacts` | Min distinct actionable-artifact kinds to pass staleness; below = thin/warn, zero on a non-trivial output = no-op/fail (default `2`) |
+| `previousOutput` | The prior comment for this target; when set, a verbatim repost is flagged as a no-op |
+| `timeline` | Optional run timeline (`startedAt`/`endedAt`/`timeoutMs`/`events`); folds in timeout / abandonment detection |
 | `worker` | Logical name for the run (shown in outputs/summary; default `ci-run`) |
 | `action` | `gate` / `minScore` / `noData` forwarded to the gate (default gate `watch`) |
 
-Why both coverage *and* relevance? They are recall vs. precision and they
-genuinely diverge: an output that lists the prompt's keywords once then pads with
-80% generic best-practices advice **passes coverage** (the topics are present)
-but **fails relevance** (most of the content is off-topic). Either failing trips
-the gate.
+Why four checks, and why do they *all* matter? They catch genuinely different
+failures and diverge in practice:
+
+- Coverage vs. relevance are recall vs. precision: an output that lists the
+  prompt's keywords once then pads with 80% generic advice **passes coverage**
+  (topics present) but **fails relevance** (mostly off-topic).
+- Staleness is orthogonal to both: an on-topic response that names every topic
+  but contains no file ref, no code, no directive — *"this looks reasonable, nice
+  work"* — **passes completeness, coverage, and relevance**, yet **fails
+  staleness** because there is nothing to act on. That is exactly the
+  review-sits-stale / nothing-actionable mode a crash check (exit 0) can't see.
+
+Any one failing trips the gate.
 
 See [`examples/ci-single-run.ts`](examples/ci-single-run.ts) for a runnable
 example (good review passes; boilerplate-posted-verbatim and generic-advice
-outputs fail).
+outputs fail on coverage/relevance; an on-topic no-op fails on staleness alone).
 
 ## License
 

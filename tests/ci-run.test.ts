@@ -1,14 +1,18 @@
 /**
- * Tests for the CI Single-Run Completeness Evaluator — Phase 4 CI Integration.
+ * Tests for the CI Single-Run Evaluator — Phase 4 CI Integration.
  *
  * Two layers:
- *   1. The pure scoring core (scoreCiRun) — completeness + keyword-coverage
- *      verdicts against hand-built prompt/output pairs that exercise the real
- *      failure modes (empty, stub, boilerplate-ignores-prompt, partial, clean).
+ *   1. The pure scoring core (scoreCiRun) — completeness + keyword-coverage +
+ *      relevance + staleness verdicts against hand-built prompt/output pairs that
+ *      exercise the real failure modes (empty, stub, boilerplate-ignores-prompt,
+ *      off-topic, on-topic-no-op, partial, clean), plus unit tests for the
+ *      artifact scanner (analyzeActionability) and the combined staleness
+ *      analysis (analyzeCiStaleness).
  *   2. evaluateCiRun end to end — that one run becomes a one-worker scorecard,
  *      the result is a valid ActionEvaluation (drops into toActionOutputs /
- *      emitActionResult), the gate behaves (clean passes, failing trips), and
- *      thresholds / gate overrides take effect.
+ *      emitActionResult), the gate behaves (clean passes, failing trips,
+ *      on-topic-no-op trips on staleness alone), and thresholds / gate overrides
+ *      take effect.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -16,6 +20,8 @@ import { describe, expect, it } from 'vitest';
 import {
   evaluateCiRun,
   scoreCiRun,
+  analyzeActionability,
+  analyzeCiStaleness,
 } from '../src/action/ci-run.js';
 import { toActionOutputs } from '../src/action/adapter.js';
 import {
@@ -110,6 +116,21 @@ consistent code style and run the linter and formatter before every push.
 Review your own changes carefully, be kind in code review discussions, and
 always be welcoming to newcomers. Keep dependencies minimal and up to date.
 Great teamwork and good habits make any codebase healthier over time.`;
+
+// The no-op failure mode the staleness check exists for: a response that is
+// on-topic (it names the rate limiter, token bucket, Redis, login endpoint) and
+// reads like a review, but contains NOTHING a human can act on — no file/line
+// refs, no code, no directive, no finding. It passes completeness AND coverage
+// AND relevance, yet a human gets zero value. This is review-sits-stale.
+const NOOP_ONTOPIC = `I took a look at the rate limiting change for the
+authentication login endpoint. The token bucket and the Redis cache are
+interesting choices and the concurrent request handling is an important area to
+think about. Overall this is a reasonable direction and the approach seems fine
+to me here. Nice work on the pull request, this all looks good and I am happy
+with where it has landed for now.`;
+
+// A bare acknowledgement: short, no substance, no artifacts.
+const ACK_ONLY = `LGTM, looks good to me. No changes needed.`;
 
 // ─── scoreCiRun — completeness check (Tier 1) ────────────────────────────────────
 
@@ -291,6 +312,209 @@ describe('scoreCiRun — relevance (Tier 2)', () => {
   });
 });
 
+// ─── scoreCiRun — staleness / no-op check (Tier 1) ────────────────────────────
+
+describe('scoreCiRun — staleness / no-op (Tier 1)', () => {
+  it('passes a review that contains concrete actionable artifacts', () => {
+    const { checks } = scoreCiRun({ prompt: REVIEW_PROMPT, output: GOOD_REVIEW });
+    const c = checks.find((x) => x.check === 'staleness');
+    expect(c?.tier).toBe(1);
+    expect(c?.status).toBe('pass');
+    // GOOD_REVIEW has a file ref (`limiter.ts`), inline code, and directives.
+    expect(Number(c?.detail?.artifactKinds)).toBeGreaterThanOrEqual(2);
+  });
+
+  it('FAILS an on-topic output that says nothing actionable (the no-op)', () => {
+    // This is the headline case: completeness, coverage, and relevance all pass
+    // (it is non-empty, names the topics, and is on-topic) yet staleness fails
+    // because there is nothing a human can act on.
+    const { checks } = scoreCiRun({ prompt: REVIEW_PROMPT, output: NOOP_ONTOPIC });
+    const stale = checks.find((x) => x.check === 'staleness');
+    const complete = checks.find((x) => x.check === 'completeness');
+    const coverage = checks.find((x) => x.check === 'keyword-coverage');
+    const relevance = checks.find((x) => x.check === 'relevance');
+    expect(complete?.status).toBe('pass');
+    expect(coverage?.status).toBe('pass');
+    expect(relevance?.status).toBe('pass');
+    // Only staleness catches it.
+    expect(stale?.status).toBe('fail');
+    expect(stale?.score).toBe(0);
+    expect(stale?.summary.toLowerCase()).toContain('no actionable content');
+    expect(Number(stale?.detail?.artifactKinds)).toBe(0);
+  });
+
+  it('FAILS a bare acknowledgement (LGTM with no substance)', () => {
+    const { checks } = scoreCiRun({ prompt: REVIEW_PROMPT, output: ACK_ONLY });
+    const c = checks.find((x) => x.check === 'staleness');
+    expect(c?.status).toBe('fail');
+    expect(c?.summary.toLowerCase()).toContain('acknowledgement');
+    expect(c?.detail?.ackOnly).toBe(true);
+  });
+
+  it('warns on a thin output: on-topic with only one actionable artifact', () => {
+    // One directive, nothing else — below the default minActionableArtifacts (2)
+    // but not empty, so it is a warn (thin), not a hard fail.
+    const thin = 'You should add a TTL to the Redis key.';
+    const { checks } = scoreCiRun({ prompt: REVIEW_PROMPT, output: thin });
+    const c = checks.find((x) => x.check === 'staleness');
+    expect(c?.status).toBe('warn');
+    expect(c?.summary.toLowerCase()).toContain('thin');
+    expect(Number(c?.detail?.artifactKinds)).toBe(1);
+  });
+
+  it('lets minActionableArtifacts tune the bar (1 artifact passes at min=1)', () => {
+    const thin = 'You should add a TTL to the Redis key.';
+    const { checks } = scoreCiRun({
+      prompt: REVIEW_PROMPT,
+      output: thin,
+      minActionableArtifacts: 1,
+    });
+    const c = checks.find((x) => x.check === 'staleness');
+    expect(c?.status).toBe('pass');
+  });
+
+  it('FAILS a verbatim repost of the prior comment (the #1302 no-op)', () => {
+    // A substantive, actionable review — but identical to what was already posted.
+    // Reposting the same comment is a no-op even though the content is rich.
+    const { checks, staleness } = scoreCiRun({
+      prompt: REVIEW_PROMPT,
+      output: GOOD_REVIEW,
+      previousOutput: GOOD_REVIEW,
+    });
+    const c = checks.find((x) => x.check === 'staleness');
+    expect(c?.status).toBe('fail');
+    expect(c?.summary.toLowerCase()).toContain('repost');
+    expect(staleness.isRepost).toBe(true);
+    expect(staleness.repostSimilarity).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it('does NOT flag a repost when the new output is genuinely different', () => {
+    const { checks, staleness } = scoreCiRun({
+      prompt: REVIEW_PROMPT,
+      output: GOOD_REVIEW,
+      previousOutput: 'Earlier I noted the README needs an install section.',
+    });
+    const c = checks.find((x) => x.check === 'staleness');
+    expect(staleness.isRepost).toBe(false);
+    expect(c?.status).toBe('pass');
+  });
+
+  it('FAILS a run that exceeded its timeout (timeline error)', () => {
+    // A timeline whose duration blows past the timeout — the #1361 abandoned /
+    // timed-out check mode. Folded into the staleness verdict.
+    const start = '2026-06-11T00:00:00.000Z';
+    const end = '2026-06-11T03:00:00.000Z'; // 3h
+    const { checks, staleness } = scoreCiRun({
+      prompt: REVIEW_PROMPT,
+      output: GOOD_REVIEW,
+      timeline: {
+        startedAt: start,
+        endedAt: end,
+        timeoutMs: 2 * 60 * 60 * 1000, // 2h limit
+        events: [
+          { timestamp: start, type: 'start' },
+          { timestamp: end, type: 'end' },
+        ],
+      },
+    });
+    const c = checks.find((x) => x.check === 'staleness');
+    expect(staleness.timeline?.issues.some((i) => i.kind === 'timeout')).toBe(true);
+    expect(c?.status).toBe('fail');
+    expect(Number(c?.detail?.timelineErrors)).toBeGreaterThan(0);
+  });
+
+  it('grades the staleness score (rich > thin > no-op)', () => {
+    const rich = scoreCiRun({ prompt: REVIEW_PROMPT, output: GOOD_REVIEW }).checks.find(
+      (x) => x.check === 'staleness',
+    );
+    const thin = scoreCiRun({
+      prompt: REVIEW_PROMPT,
+      output: 'You should add a TTL to the Redis key.',
+    }).checks.find((x) => x.check === 'staleness');
+    const noop = scoreCiRun({ prompt: REVIEW_PROMPT, output: NOOP_ONTOPIC }).checks.find(
+      (x) => x.check === 'staleness',
+    );
+    expect(rich?.score).toBeGreaterThan(thin?.score ?? 1);
+    expect(thin?.score).toBeGreaterThan(noop?.score ?? 1);
+  });
+});
+
+// ─── analyzeActionability — artifact scan unit tests ─────────────────────────
+
+describe('analyzeActionability — concrete artifact detection', () => {
+  it('counts each artifact kind at most once', () => {
+    // Three fenced blocks, but code-block counts once.
+    const out = '```a```\n```b```\n```c```';
+    const a = analyzeActionability(out);
+    expect(a.kinds.filter((k) => k === 'code-block')).toHaveLength(1);
+    expect(a.count).toBe(a.kinds.length);
+  });
+
+  it('detects file references', () => {
+    expect(analyzeActionability('see src/auth/login.ts').kinds).toContain('file-ref');
+    expect(analyzeActionability('update `config.yml`').kinds).toContain('file-ref');
+  });
+
+  it('detects line references', () => {
+    expect(analyzeActionability('the bug is on line 42').kinds).toContain('line-ref');
+    expect(analyzeActionability('see L100-120').kinds).toContain('line-ref');
+  });
+
+  it('detects inline code references', () => {
+    expect(analyzeActionability('use `INCR` here').kinds).toContain('inline-code');
+  });
+
+  it('does NOT treat the bare word "diff" as a patch artifact', () => {
+    // "review your own diff" is prose, not a patch — a common false positive.
+    expect(analyzeActionability('please review your own diff first').kinds).not.toContain('diff');
+  });
+
+  it('does NOT treat a polysemous noun ("change", "set") as a directive', () => {
+    // "the rate limiting change" / "the result set" are nouns, not directives.
+    const a = analyzeActionability('I looked at the rate limiting change and the result set.');
+    expect(a.kinds).not.toContain('directive');
+  });
+
+  it('detects a directive when an imperative verb is paired with code', () => {
+    expect(analyzeActionability('use `INCR` for the counter').kinds).toContain('directive');
+  });
+
+  it('detects strong recommendation words as directives', () => {
+    expect(analyzeActionability('you should consider a Lua script').kinds).toContain('directive');
+    expect(analyzeActionability('I recommend wrapping this in a try/catch').kinds).toContain(
+      'directive',
+    );
+  });
+
+  it('finds nothing actionable in pure prose', () => {
+    expect(analyzeActionability('This looks good and I am happy with it.').count).toBe(0);
+  });
+});
+
+// ─── analyzeCiStaleness — combined analysis ────────────────────────────────
+
+describe('analyzeCiStaleness — combined no-op analysis', () => {
+  it('reports no repost and NaN similarity when no previousOutput is given', () => {
+    const a = analyzeCiStaleness({ prompt: REVIEW_PROMPT, output: GOOD_REVIEW });
+    expect(a.isRepost).toBe(false);
+    expect(Number.isNaN(a.repostSimilarity)).toBe(true);
+  });
+
+  it('omits the timeline analysis when no timeline is given', () => {
+    const a = analyzeCiStaleness({ prompt: REVIEW_PROMPT, output: GOOD_REVIEW });
+    expect(a.timeline).toBeUndefined();
+  });
+
+  it('fills the timeline output from the run output when unset', () => {
+    const a = analyzeCiStaleness({
+      prompt: REVIEW_PROMPT,
+      output: GOOD_REVIEW,
+      timeline: { startedAt: '2026-06-11T00:00:00.000Z' },
+    });
+    expect(a.timeline).toBeDefined();
+  });
+});
+
 // ─── evaluateCiRun — end to end ──────────────────────────────────────────────────
 
 describe('evaluateCiRun — end to end', () => {
@@ -312,11 +536,12 @@ describe('evaluateCiRun — end to end', () => {
     expect(card.workers[0]?.runs).toBe(1);
     expect(card.totals.runs).toBe(1);
 
-    // All three checks present in the verdict path.
+    // All four checks present in the verdict path.
     expect(result.checks.map((c) => c.check).sort()).toEqual([
       'completeness',
       'keyword-coverage',
       'relevance',
+      'staleness',
     ]);
   });
 
@@ -352,6 +577,26 @@ describe('evaluateCiRun — end to end', () => {
     // The relevance check is the (or a) reason — it fails on this output.
     const relevance = result.checks.find((c) => c.check === 'relevance');
     expect(relevance?.status).toBe('fail');
+  });
+
+  it('fails an on-topic no-op (staleness alone trips the gate)', () => {
+    // The headline failure mode: the other three checks pass (non-empty,
+    // on-topic, covers the keywords), but the output says nothing actionable.
+    // A crash check (exit 0) cannot see this; the staleness check does.
+    const result = evaluateCiRun({
+      prompt: REVIEW_PROMPT,
+      output: NOOP_ONTOPIC,
+      worker: 'claude-review',
+      now: FIXED_NOW,
+    });
+    expect(result.evaluation.passed).toBe(false);
+    expect(result.evaluation.exitCode).toBe(1);
+    expect(result.evaluation.failingWorkers).toBe(1);
+    const stale = result.checks.find((c) => c.check === 'staleness');
+    const others = result.checks.filter((c) => c.check !== 'staleness');
+    expect(stale?.status).toBe('fail');
+    // Every non-staleness check passed — staleness is the sole reason.
+    expect(others.every((c) => c.status === 'pass')).toBe(true);
   });
 
   it('fails an empty run', () => {
@@ -437,7 +682,7 @@ describe('evaluateCiRun — end to end', () => {
     expect(relaxed.evaluation.passed).toBe(true);
   });
 
-  it('exposes the raw completeness, coverage, and gap analyses', () => {
+  it('exposes the raw completeness, coverage, gap, relevance, and staleness analyses', () => {
     const result = evaluateCiRun({
       prompt: REVIEW_PROMPT,
       output: BOILERPLATE_OUTPUT,
@@ -450,6 +695,11 @@ describe('evaluateCiRun — end to end', () => {
     // The raw relevance analysis is exposed too (similarity + off-topic terms).
     expect(typeof result.relevance.score).toBe('number');
     expect(result.relevance.extraTerms.length).toBeGreaterThan(0);
+    // The raw staleness analysis is exposed (artifact scan + signals).
+    expect(result.staleness.artifacts).toBeDefined();
+    expect(typeof result.staleness.artifacts.count).toBe('number');
+    expect(Array.isArray(result.staleness.abandonment)).toBe(true);
+    expect(typeof result.staleness.isRepost).toBe('boolean');
   });
 
   it('is deterministic — same inputs produce the same verdict and score', () => {
@@ -468,5 +718,7 @@ describe('package root re-exports the CI run evaluator', () => {
     const mod = await import('../src/index.js');
     expect(typeof mod.evaluateCiRun).toBe('function');
     expect(typeof mod.scoreCiRun).toBe('function');
+    expect(typeof mod.analyzeActionability).toBe('function');
+    expect(typeof mod.analyzeCiStaleness).toBe('function');
   });
 });

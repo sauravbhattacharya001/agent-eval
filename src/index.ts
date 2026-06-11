@@ -507,6 +507,8 @@ export {
   createMemoryWriter,
   scoreCiRun,
   evaluateCiRun,
+  analyzeActionability,
+  analyzeCiStaleness,
 } from './action/index.js';
 export type {
   GateGrade,
@@ -524,4 +526,6 @@ export type {
   CiCheckResult,
   EvaluateCiRunOptions,
   CiRunEvaluation,
+  ActionableArtifacts,
+  StalenessAnalysis,
 } from './action/index.js';

@@ -55,6 +55,8 @@ export type {
 export {
   scoreCiRun,
   evaluateCiRun,
+  analyzeActionability,
+  analyzeCiStaleness,
 } from './ci-run.js';
 
 export type {
@@ -62,4 +64,6 @@ export type {
   CiCheckResult,
   EvaluateCiRunOptions,
   CiRunEvaluation,
+  ActionableArtifacts,
+  StalenessAnalysis,
 } from './ci-run.js';

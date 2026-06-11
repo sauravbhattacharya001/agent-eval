@@ -12,11 +12,15 @@
  * only — no LLM calls, no API keys, fully offline and reproducible. Coverage and
  * relevance are duals: coverage is recall ("did the output mention the prompt's
  * topics?"), relevance is precision ("is the output *about* THIS PR, or generic
- * advice?").
+ * advice?"). A fourth Tier 1 check, **staleness**, catches the no-op: a run that
+ * is complete, on-topic, and at length but emits nothing a human can act on
+ * (no file refs, line numbers, code suggestions, or directives) — the
+ * review-sits-stale / nothing-actionable failure mode.
  *
  * Usage:
  *   # Built-in demo: a good review (passes), boilerplate posted verbatim (fails),
- *   # and generic best-practices advice that ignores the diff (fails on relevance)
+ *   # generic best-practices advice that ignores the diff (fails on relevance),
+ *   # and an on-topic no-op that says nothing actionable (fails on staleness)
  *   npx tsx examples/ci-single-run.ts
  *
  *   # Real inputs from files:
@@ -27,6 +31,7 @@
  *   AGENT_EVAL_IGNORED    coverage at/under this hard-fails the run (default: 0.15)
  *   AGENT_EVAL_RELEVANCE  min prompt similarity [0,1] to pass       (default: 0.2)
  *   AGENT_EVAL_OFFTOPIC   similarity at/under this hard-fails       (default: 0.08)
+ *   AGENT_EVAL_ARTIFACTS  min actionable artifact kinds to pass     (default: 2)
  *   AGENT_EVAL_WORKER     logical run name shown in outputs/summary (default: ci-run)
  *   AGENT_EVAL_TITLE      step-summary heading                      (default: PR Review Eval)
  */
@@ -77,6 +82,17 @@ before pushing. Review your own diff first, be kind in discussions, and keep you
 dependencies up to date. Good habits like these make any codebase healthier and
 easier to maintain for the whole team over time.`;
 
+// The no-op failure mode the staleness check exists for: a response that is
+// on-topic (it names the rate limiter, token bucket, Redis) and reads like a
+// review, but contains NOTHING a human can act on — no file/line refs, no code
+// suggestion, no directive, no finding. It passes completeness AND relevance,
+// yet a human gets zero value from it. This is the review-sits-stale issue.
+const DEMO_NOOP_OUTPUT = `I took a look at the rate limiting change for the
+authentication login endpoint. The token bucket and the Redis cache are
+interesting choices and the concurrent request handling is an important area.
+Overall this is a reasonable direction and the approach seems fine to me. Nice
+work on the pull request, this all looks good and I am happy with where it is.`;
+
 function main(): void {
   const worker = process.env.AGENT_EVAL_WORKER ?? 'ci-run';
   const title = process.env.AGENT_EVAL_TITLE ?? 'PR Review Eval';
@@ -84,6 +100,7 @@ function main(): void {
   const ignoredPromptThreshold = parseNumber(process.env.AGENT_EVAL_IGNORED);
   const relevanceThreshold = parseNumber(process.env.AGENT_EVAL_RELEVANCE);
   const offTopicThreshold = parseNumber(process.env.AGENT_EVAL_OFFTOPIC);
+  const minActionableArtifacts = parseNumber(process.env.AGENT_EVAL_ARTIFACTS);
 
   const promptFile = process.argv[2];
   const outputFile = process.argv[3];
@@ -101,6 +118,7 @@ function main(): void {
       ...(ignoredPromptThreshold !== undefined ? { ignoredPromptThreshold } : {}),
       ...(relevanceThreshold !== undefined ? { relevanceThreshold } : {}),
       ...(offTopicThreshold !== undefined ? { offTopicThreshold } : {}),
+      ...(minActionableArtifacts !== undefined ? { minActionableArtifacts } : {}),
     });
     console.log(`agent-eval: ${evaluation.headline}`);
     for (const e of evaluation.evidence) console.log(`  - ${e.message}`);
@@ -116,6 +134,7 @@ function main(): void {
     ['GOOD review (addresses the diff)', DEMO_GOOD_OUTPUT],
     ['BAD output (contributing guide posted verbatim)', DEMO_BAD_OUTPUT],
     ['OFF-TOPIC output (generic best-practices advice)', DEMO_OFFTOPIC_OUTPUT],
+    ['NO-OP output (on-topic but nothing actionable)', DEMO_NOOP_OUTPUT],
   ] as const) {
     const { evaluation, checks } = evaluateCiRun({
       prompt: DEMO_PROMPT,
@@ -125,6 +144,7 @@ function main(): void {
       ...(ignoredPromptThreshold !== undefined ? { ignoredPromptThreshold } : {}),
       ...(relevanceThreshold !== undefined ? { relevanceThreshold } : {}),
       ...(offTopicThreshold !== undefined ? { offTopicThreshold } : {}),
+      ...(minActionableArtifacts !== undefined ? { minActionableArtifacts } : {}),
     });
     console.log(`── ${label}`);
     console.log(`   ${evaluation.headline}`);
@@ -134,10 +154,11 @@ function main(): void {
     console.log('');
   }
 
-  // Gate on the off-topic run so the example exits non-zero (what CI would do).
-  // It is the most interesting failure: completeness passes, but it is not about
-  // this PR — exactly what a crash check (exit 0) cannot see.
-  const { evaluation } = evaluateCiRun({ prompt: DEMO_PROMPT, output: DEMO_OFFTOPIC_OUTPUT, worker });
+  // Gate on the no-op run so the example exits non-zero (what CI would do). It is
+  // the most interesting failure: completeness AND relevance pass (it is
+  // non-empty and on-topic), but the staleness check catches that it says nothing
+  // actionable — exactly the review-sits-stale mode a crash check (exit 0) misses.
+  const { evaluation } = evaluateCiRun({ prompt: DEMO_PROMPT, output: DEMO_NOOP_OUTPUT, worker });
   process.exitCode = emitActionResult(evaluation, { title });
 }
 

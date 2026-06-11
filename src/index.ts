@@ -505,6 +505,8 @@ export {
   runAndEmit,
   createEnvWriter,
   createMemoryWriter,
+  scoreCiRun,
+  evaluateCiRun,
 } from './action/index.js';
 export type {
   GateGrade,
@@ -518,4 +520,8 @@ export type {
   MemoryWriter,
   RunActionEvalOptions,
   RunActionEvalResult,
+  CiCheckStatus,
+  CiCheckResult,
+  EvaluateCiRunOptions,
+  CiRunEvaluation,
 } from './action/index.js';

@@ -487,6 +487,48 @@ See [`examples/ci-eval.ts`](examples/ci-eval.ts) for a runnable CI entry point
 and [`examples/github-action-eval.yml`](examples/github-action-eval.yml) for a
 full workflow that gates a PR on agent output quality.
 
+### Evaluating a single run (one PR / one issue)
+
+The scorecard gate above answers *"how healthy is the fleet?"* over a window of
+transcripts. Often a CI step has a narrower question with the inputs to answer
+it directly: **"did the agent address THIS prompt?"** — for one PR review, one
+issue triage, one change. `evaluateCiRun` scores a single `{ prompt, output }`
+pair and returns the **same** `ActionEvaluation` shape, so it drops straight
+into `emitActionResult`:
+
+```typescript
+import { evaluateCiRun, emitActionResult } from 'agent-eval';
+
+const { evaluation } = evaluateCiRun({
+  prompt: prTitle + '\n\n' + prBody,   // the task the agent was given
+  output: claudeReviewComment,         // what it produced
+  worker: 'claude-review',
+});
+
+process.exitCode = emitActionResult(evaluation);  // outputs + summary + exit
+```
+
+It runs two independent checks, no model-as-judge:
+
+- **Completeness** (Tier 1) — is the output non-empty, substantive, and not a
+  stub / truncated / refusal? The bytes are the bytes; the agent can't forge
+  "non-empty".
+- **Keyword coverage** (Tier 2) — does the output cover the topics the *prompt*
+  asked about? The prompt is the reference the agent never authored, so it can't
+  grade its own coverage. Coverage at/under `ignoredPromptThreshold` is a hard
+  fail — this is the *"posted the guidance file verbatim instead of a review"*
+  failure mode.
+
+| Knob | Meaning |
+|------|---------|
+| `coverageThreshold` | Min prompt-topic coverage `[0,1]` to pass (default `0.4`) |
+| `ignoredPromptThreshold` | At/under this coverage the run hard-fails as "ignored the prompt" (default `0.15`) |
+| `worker` | Logical name for the run (shown in outputs/summary; default `ci-run`) |
+| `action` | `gate` / `minScore` / `noData` forwarded to the gate (default gate `watch`) |
+
+See [`examples/ci-single-run.ts`](examples/ci-single-run.ts) for a runnable
+example (good review passes, boilerplate-posted-verbatim fails).
+
 ## License
 
 MIT

@@ -51,3 +51,15 @@ export type {
   RunActionEvalOptions,
   RunActionEvalResult,
 } from './runner.js';
+
+export {
+  scoreCiRun,
+  evaluateCiRun,
+} from './ci-run.js';
+
+export type {
+  CiCheckStatus,
+  CiCheckResult,
+  EvaluateCiRunOptions,
+  CiRunEvaluation,
+} from './ci-run.js';

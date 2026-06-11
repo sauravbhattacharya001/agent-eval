@@ -494,3 +494,28 @@ export type {
   ChainResult,
   ChainRunnerOptions,
 } from './chain/index.js';
+
+// GitHub Action Integration (Phase 4 — CI quality gate)
+export {
+  evaluateForAction,
+  toActionOutputs,
+  renderActionSummary,
+  runActionEval,
+  emitActionResult,
+  runAndEmit,
+  createEnvWriter,
+  createMemoryWriter,
+} from './action/index.js';
+export type {
+  GateGrade,
+  NoDataPolicy,
+  EvaluateForActionOptions,
+  WorkerVerdict,
+  ActionEvidence,
+  ActionEvaluation,
+  ActionOutputs,
+  ActionWriter,
+  MemoryWriter,
+  RunActionEvalOptions,
+  RunActionEvalResult,
+} from './action/index.js';

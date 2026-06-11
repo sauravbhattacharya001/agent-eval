@@ -1,0 +1,53 @@
+# Example: gate a CI job on agent output quality with agent-eval.
+#
+# This workflow scores the structured run transcripts an agent writes
+# (transcripts/<worker>/*.md) over a rolling window, then fails the job if any
+# worker falls below the configured health gate. It demonstrates the seam the
+# `agent-eval` GitHub Action adapter is designed for: after an autonomous agent
+# finishes its work in CI, evaluate *what it produced* before the job is allowed
+# to go green.
+#
+# The eval step itself is deterministic and offline (Tier 1 + Tier 2 checks,
+# no model-as-judge): it never calls an LLM, so it adds no API cost or flake.
+
+name: agent-eval quality gate
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - run: npm ci
+
+      # ... your autonomous agent runs here and writes transcripts to
+      #     ./transcripts/<worker>/YYYY-MM-DD-HHmm.md ...
+
+      # Score the transcripts and gate the job on the result. The script writes
+      # GitHub Action outputs (eval_passed, eval_score, eval_evidence, …) and a
+      # step summary, then exits non-zero if the gate is not met.
+      - name: Evaluate agent output
+        id: agent_eval
+        run: npx tsx examples/ci-eval.ts ./transcripts
+        env:
+          # Worst grade that still passes. healthy | watch | at-risk | critical
+          AGENT_EVAL_GATE: watch
+          # Rolling window (days) of transcripts to score.
+          AGENT_EVAL_WINDOW: '7'
+          # Optional fleet mean-score floor in [0,1].
+          AGENT_EVAL_MIN_SCORE: '0.6'
+
+      # Downstream steps can branch on the eval outputs without re-running it.
+      - name: Comment on the PR when the gate fails
+        if: ${{ failure() && steps.agent_eval.outputs.eval_passed == 'false' }}
+        run: |
+          echo "Agent eval failed: ${{ steps.agent_eval.outputs.eval_headline }}"
+          echo "Evidence: ${{ steps.agent_eval.outputs.eval_evidence }}"

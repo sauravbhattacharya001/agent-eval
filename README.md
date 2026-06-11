@@ -12,6 +12,7 @@ Think: **Jest/Vitest but for agent outputs** instead of functions.
 - 🔍 **Hallucination detection** — flag fabricated facts, broken links, invented references
 - 📐 **Drift monitoring** — catch when an agent sidetracks from its assigned task
 - 🔁 **Repetition/loop detection** — catch stuck agents and saturated output
+- 🚦 **CI quality gate** — gate a GitHub Action on agent output quality (deterministic, offline)
 - ✅ **Clear pass/fail** — results with evidence for what went wrong
 
 ## Philosophy
@@ -440,6 +441,51 @@ Duration: 1544ms
   Tier 2: 3/3 passed
   Tier 3: 1/1 passed
 ```
+
+## CI Quality Gate (GitHub Action)
+
+Most autonomous agents running in CI only have one built-in check: *did the
+process exit 0?* That catches a crash, but not a stale run, an empty review, or
+output that wandered off the task. The action adapter turns the production
+monitoring scorecard into a **pass/fail gate** a workflow can block on — and it
+is deterministic and offline (Tier 1 + Tier 2 only, **no model-as-judge**), so
+it adds no API cost or flake.
+
+It projects a `Scorecard` into the three shapes a GitHub Action consumes: step
+outputs (`eval_passed`, `eval_score`, `eval_evidence`, …), a Markdown step
+summary, and an exit code.
+
+```typescript
+import { runActionEval, emitActionResult } from 'agent-eval';
+
+// Score the transcripts an agent wrote, over a rolling window, then gate the job.
+const { evaluation } = runActionEval('./transcripts', {
+  window: 7,          // score the last 7 days of runs
+  gate: 'watch',      // healthy/watch pass; at-risk/critical fail the step
+  minScore: 0.6,      // also require a fleet mean-score floor (optional)
+});
+
+// Writes outputs + step summary to the runner (a no-op locally), returns 0/1.
+process.exitCode = emitActionResult(evaluation);
+```
+
+The decision is pure and separately testable (`evaluateForAction`), the file
+effects are isolated behind an injectable writer (`createEnvWriter` for a real
+runner, `createMemoryWriter` for tests), and the gate can be scoped to specific
+workers (`gateWorkers`) or relaxed for agents that legitimately have nothing to
+evaluate (`noData: 'pass' | 'fail' | 'ignore'`).
+
+| Knob | Meaning |
+|------|---------|
+| `gate` | Worst health grade that still passes: `healthy` \| `watch` \| `at-risk` \| `critical` |
+| `minScore` | Optional fleet mean-score floor in `[0, 1]` |
+| `gateWorkers` | Restrict the gate to specific workers (others are reported but never fail) |
+| `noData` | How to treat workers with no evaluable runs (default: `pass`) |
+| `window` | Rolling window (days) of transcripts to score |
+
+See [`examples/ci-eval.ts`](examples/ci-eval.ts) for a runnable CI entry point
+and [`examples/github-action-eval.yml`](examples/github-action-eval.yml) for a
+full workflow that gates a PR on agent output quality.
 
 ## License
 

@@ -51,8 +51,6 @@ export interface BuildScorecardOptions
       | 'excludeWorkers'
       | 'timeoutMs'
       | 'minOutputWords'
-      | 'relevanceThreshold'
-      | 'coverageThreshold'
     > {
   /**
    * Trailing calendar-day window the scorecard covers. Applied to both the
@@ -161,12 +159,6 @@ export function buildScorecard(
     ...(options.now ? { today: options.now } : {}),
     ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
     ...(options.minOutputWords !== undefined ? { minOutputWords: options.minOutputWords } : {}),
-    ...(options.relevanceThreshold !== undefined
-      ? { relevanceThreshold: options.relevanceThreshold }
-      : {}),
-    ...(options.coverageThreshold !== undefined
-      ? { coverageThreshold: options.coverageThreshold }
-      : {}),
   };
   const scoreResult = scoreHistory(root, scoreOpts);
 

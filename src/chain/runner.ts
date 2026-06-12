@@ -61,7 +61,7 @@ export interface ChainRunnerOptions {
  *       .assert(toBeNonEmpty(), toContain('eval'))
  *       .build(),
  *     step('verify-actionable', (ctx) => `Is this review actionable? "${ctx.outputs[0]}"`)
- *       .assert(toContain('yes'), toBeRelevantTo('actionability'))
+ *       .assert(toContain('yes'))
  *       .build(),
  *   ],
  * });

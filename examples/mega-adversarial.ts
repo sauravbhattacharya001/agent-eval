@@ -19,7 +19,7 @@ import {
   AgentProvider, defineTool, runTiered,
   tier1, tier2, tier3,
   toBeNonEmpty, toNotRepeat, toNotBeSaturated,
-  toBeRelevantTo, toPassJudge,
+  toPassJudge,
   buildRubric, LLMJudgeBackend,
 } from '../src/index.js';
 

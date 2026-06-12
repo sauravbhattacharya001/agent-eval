@@ -25,7 +25,7 @@
  *     Transcript
  *        │
  *        ▼  scoreTranscript
- *     CheckScore[]  (staleness, completeness, relevance, keyword-coverage, …)
+ *     CheckScore[]  (staleness, completeness, verification, …)
  *        │
  *        ▼  appendScores / writeScoresFor (scores-store.ts)
  *     transcripts/<worker>/scores.jsonl
@@ -35,10 +35,6 @@
  */
 
 import { checkCompleteness } from '../checks/completeness.js';
-import type { KeywordCoverageScoringOptions } from '../checks/keyword-coverage.js';
-import { scoreKeywordCoverage } from '../checks/keyword-coverage.js';
-import type { RelevanceOptions } from '../checks/relevance.js';
-import { analyzeRelevance } from '../checks/relevance.js';
 import { analyzeStaleness, formatDuration } from '../checks/staleness.js';
 
 import { transcriptToTimeline } from './timeline-bridge.js';
@@ -56,9 +52,7 @@ export type ScoreStatus = 'pass' | 'fail' | 'warn' | 'skip';
 export type CheckName =
   | 'staleness'
   | 'completeness'
-  | 'verification'
-  | 'relevance'
-  | 'keyword-coverage';
+  | 'verification';
 
 /**
  * One scored check for one transcript. This is the atomic row written to
@@ -143,16 +137,8 @@ export interface ScoreTranscriptOptions {
    * key-outputs). Below this, completeness is penalized. Default: 20.
    */
   minOutputWords?: number;
-  /** Relevance threshold to count as a pass. Default: 0.12 (transcripts are terse). */
-  relevanceThreshold?: number;
-  /** Keyword-coverage threshold to count as a pass. Default: 0.4. */
-  coverageThreshold?: number;
   /** Override for the timestamp recorded on score rows (testing). */
   now?: Date;
-  /** Extra relevance options forwarded to {@link analyzeRelevance}. */
-  relevanceOptions?: RelevanceOptions;
-  /** Extra keyword-coverage options forwarded to {@link scoreKeywordCoverage}. */
-  keywordOptions?: KeywordCoverageScoringOptions;
   /**
    * Optional GROUND-TRUTH run metadata from the orchestrator (cron/process
    * status), keyed independently of the transcript's self-report. When
@@ -190,8 +176,6 @@ export interface RunMetadata {
 // ─── CONSTANTS ──────────────────────────────────────────────────────────────────
 
 const DEFAULT_MIN_OUTPUT_WORDS = 20;
-const DEFAULT_RELEVANCE_THRESHOLD = 0.12;
-const DEFAULT_COVERAGE_THRESHOLD = 0.4;
 
 /** Default per-worker timeout budgets (ms). Conservative, used only if caller
  * does not supply their own. These mirror the cron cadence headroom — a run
@@ -482,108 +466,13 @@ function scoreCompleteness(
   };
 }
 
-/**
- * Score how relevant the deliverables are to the stated task using the Tier 2
- * TF-IDF cosine relevance check. Offline, no LLM. The normalized score is the
- * cosine similarity itself (already in [0, 1]); status compares it to the
- * threshold.
- *
- * Skipped when the transcript has no `## Task` section — relevance is undefined
- * without a reference point, and we never fabricate one.
- */
-function scoreRelevance(
-  t: Transcript,
-  threshold: number,
-  options: RelevanceOptions | undefined,
-): { score: number; status: ScoreStatus; summary: string; detail: Record<string, number | string | boolean> } {
-  const task = t.task.trim();
-  const output = deliverables(t);
-
-  if (!task || !output) {
-    return {
-      score: 0,
-      status: 'skip',
-      summary: !task ? 'no task section to compare against' : 'no deliverables to compare',
-      detail: { skipped: true },
-    };
-  }
-
-  const result = analyzeRelevance(task, output, { threshold, ...options });
-  const score = clamp01(result.score);
-  // Tier 2 is GRADING, not gating: it answers "how well does the output match
-  // the task?" on a 0-1 gradient. A low grade is real information (reported via
-  // the score), but it is never a `fail` - `fail` is reserved for Tier 1 gates
-  // (did the agent actually do the thing?). Capping at `warn` stops a grade
-  // from masquerading as a gate failure and inflating failCount/scorecards.
-  const status: ScoreStatus = result.relevant ? 'pass' : 'warn';
-  const top = result.sharedTerms.slice(0, 3).map((s) => s.term).join(', ');
-
-  return {
-    score,
-    status,
-    summary: result.relevant
-      ? `on-task (sim=${score.toFixed(2)}${top ? `, shared: ${top}` : ''})`
-      : `low relevance (sim=${score.toFixed(2)}, threshold=${threshold})`,
-    detail: {
-      similarity: Number(score.toFixed(4)),
-      threshold,
-      sharedTerms: result.sharedTerms.length,
-      missingTerms: result.missingTerms.length,
-    },
-  };
-}
-
-/**
- * Score keyword coverage — did the deliverables actually touch the key topics
- * the task implies? Tier 2 automatic topic extraction, no hand-written keyword
- * lists. Skipped without a task section, same rationale as relevance.
- */
-function scoreCoverage(
-  t: Transcript,
-  threshold: number,
-  options: KeywordCoverageScoringOptions | undefined,
-): { score: number; status: ScoreStatus; summary: string; detail: Record<string, number | string | boolean> } {
-  const task = t.task.trim();
-  const output = deliverables(t);
-
-  if (!task || !output) {
-    return {
-      score: 0,
-      status: 'skip',
-      summary: !task ? 'no task section to extract topics from' : 'no deliverables to score',
-      detail: { skipped: true },
-    };
-  }
-
-  const result = scoreKeywordCoverage(task, output, { minCoverage: threshold, ...options });
-  const score = clamp01(result.score);
-  // Tier 2 grading: cap at `warn`. A low coverage score is reported on the
-  // gradient but never escalates to `fail` (see scoreRelevance for rationale).
-  const status: ScoreStatus = result.passing ? 'pass' : 'warn';
-
-  return {
-    score,
-    status,
-    summary: result.passing
-      ? `covered ${result.coveredCount}/${result.totalKeywords} key topics (${score.toFixed(2)})`
-      : `missed topics: ${result.missedCount}/${result.totalKeywords} (${score.toFixed(2)} < ${threshold})`,
-    detail: {
-      coverage: Number(score.toFixed(4)),
-      threshold,
-      covered: result.coveredCount,
-      missed: result.missedCount,
-      total: result.totalKeywords,
-    },
-  };
-}
-
 // ─── PUBLIC API ──────────────────────────────────────────────────────────────────
 
 /**
  * Score one parsed transcript with all Tier 1 + Tier 2 historical checks.
  *
  * Returns a {@link TranscriptScore} containing one {@link CheckScore} per check
- * plus a roll-up. Checks that cannot run (e.g. relevance with no `## Task`) are
+ * plus a roll-up. Checks that cannot run (e.g. completeness with no deliverables) are
  * emitted with `status: 'skip'` and excluded from the roll-up rather than
  * silently dropped — a skipped check is information, not absence.
  *
@@ -596,8 +485,6 @@ export function scoreTranscript(
 ): TranscriptScore {
   const {
     minOutputWords = DEFAULT_MIN_OUTPUT_WORDS,
-    relevanceThreshold = DEFAULT_RELEVANCE_THRESHOLD,
-    coverageThreshold = DEFAULT_COVERAGE_THRESHOLD,
     now = new Date(),
   } = options;
 
@@ -619,8 +506,6 @@ export function scoreTranscript(
 
   const stale = scoreStaleness(transcript, timeoutMs);
   const complete = scoreCompleteness(transcript, minOutputWords);
-  const relevance = scoreRelevance(transcript, relevanceThreshold, options.relevanceOptions);
-  const coverage = scoreCoverage(transcript, coverageThreshold, options.keywordOptions);
   const meta = resolveRunMetadata(runId, worker, options.runMetadata);
   const verification = scoreVerification(transcript, meta);
 
@@ -628,8 +513,6 @@ export function scoreTranscript(
     { ...base, check: 'staleness', tier: 1, ...stale },
     { ...base, check: 'completeness', tier: 1, ...complete },
     { ...base, check: 'verification', tier: 1, ...verification },
-    { ...base, check: 'relevance', tier: 2, ...relevance },
-    { ...base, check: 'keyword-coverage', tier: 2, ...coverage },
   ];
 
   const scored = checks.filter((c) => c.status !== 'skip');

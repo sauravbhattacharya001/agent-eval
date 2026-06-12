@@ -67,7 +67,7 @@ function trend(
   };
 }
 
-type TestCheck = 'completeness' | 'staleness' | 'relevance' | 'keyword-coverage';
+type TestCheck = 'completeness' | 'staleness';
 
 interface WorkerSpec {
   worker: string;

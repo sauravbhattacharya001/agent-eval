@@ -239,9 +239,9 @@ export interface ExtractCcaRunOptions {
   /**
    * The task the agent was given (PR title+body, issue text, the action's
    * resolved prompt). The execution file does not contain it, so supply it here
-   * to enable the coverage / relevance checks. Without it those checks have an
-   * empty reference and {@link evaluateCiRun} will lean on completeness +
-   * staleness only.
+   * as task context for the run. {@link evaluateCiRun} scores completeness +
+   * staleness; the prompt is recorded as the run's task even when those checks
+   * do not require it.
    */
   prompt?: string;
   /**

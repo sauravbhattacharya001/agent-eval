@@ -41,14 +41,14 @@ The tier table above is the **independence** axis (can the agent forge the resul
 | Question | *Did the agent do the thing?* | *How well does the output match the task?* |
 | Output | binary — `pass` / `fail` | a score on a 0–1 gradient |
 | Right verdict | `fail` is meaningful | a low score is **information, not a failure** |
-| Examples | non-empty, valid JSON, not-abandoned, meaningful diff, **verification** | relevance, keyword-coverage |
+| Examples | non-empty, valid JSON, not-abandoned, meaningful diff, **verification** | judge rubric scores (relevance, quality, depth) |
 
-A grade answering *"how well"* should never be coerced into a *"did it / didn't it"* — a 0.00 relevance score against a vague prompt is a real, low **grade**, not a failed gate.
+A grade answering *"how well"* should never be coerced into a *"did it / didn't it"* — a 0.00 judge-rubric relevance score against a vague prompt is a real, low **grade**, not a failed gate.
 
 **Who decides a signal is a gate matters more than its tier.** The same Tier-2 check behaves differently depending on the surface:
 
-- **You assert on it** (`tier2(toBeRelevantTo(task))` via [`runTiered`](#tiered-runner-cost-pyramid)) → it **gates**. You opted in; a binary pass/fail is what you asked for. Here "tier" is a *cost ordering* (run cheap checks first, short-circuit) — failures are expected and intended.
-- **The system auto-scores it** (`relevance` / `keyword-coverage` in [`scoreTranscript`](#ci-quality-gate-github-action)) → it **grades**. You didn't opt in; the scorer applies it to *every* transcript, so a low grade caps at `warn` and never silently inflates the failure count. (Tier 1 auto-scores still gate — they're forge-proof and unambiguous.)
+- **You assert on it** (`tier2(toContainKeywords(topics))` via [`runTiered`](#tiered-runner-cost-pyramid)) → it **gates**. You opted in; a binary pass/fail is what you asked for. Here "tier" is a *cost ordering* (run cheap checks first, short-circuit) — failures are expected and intended.
+- **The system auto-scores it** (the Tier-3 [judge rubric](#llm-judge-tier-3)) → it **grades**. You didn't opt in; the scorer reports a 0–1 score, so a low grade is information and never silently inflates the failure count. (Tier 1 auto-scores still gate — they're forge-proof and unambiguous.)
 
 So: *gate when the author chose this signal as a bar to clear; grade when the system is scoring quality the author didn't single out.*
 
@@ -130,7 +130,7 @@ import {
   AgentProvider, defineTool, runTiered,
   tier1, tier2, tier3,
   toBeNonEmpty, toNotBeAbandoned, toHaveMeaningfulDiff,
-  toBeRelevantTo, toNotRepeat, toNotBeStale,
+  toNotRepeat, toNotBeStale,
   toPassJudge, BUILTIN_RUBRICS, LLMJudgeBackend,
 } from 'agent-eval';
 
@@ -169,7 +169,7 @@ const tieredResult = await runTiered(result.output, [
   tier1(toHaveMeaningfulDiff(originalCode)),
 
   // Tier 2 — Heuristic (cheap, milliseconds)
-  tier2(toBeRelevantTo('security hardcoded hashing vulnerability')),
+  tier2(toContainKeywords(['hashing', 'bcrypt', 'salt'])),
   tier2(toNotRepeat()),
   tier2(toNotBeStale(result.timeline)),
 
@@ -206,7 +206,7 @@ import { runTiered, tier1, tier2, tier3 } from 'agent-eval';
 const result = await runTiered(output, [
   tier1(toBeValidJson()),
   tier1(toBeNonEmpty()),
-  tier2(toBeRelevantTo(task)),
+  tier2(toContainKeywords(topics)),
   tier2(toNotRepeat()),
   tier3(toPassJudge(backend, rubric)),
 ]);
@@ -404,12 +404,10 @@ if (!report.calibrated) {
 
 | Assertion | Description |
 |-----------|-------------|
-| `toBeRelevantTo(task)` | TF-IDF relevance scoring |
-| `toNotDriftFrom(task)` | Topic drift detection |
 | `toNotRepeat()` | Repetition/loop detection |
 | `toNotBeSaturated()` | N-gram saturation check |
 | `toNotBeStale(timeline)` | Progress staleness detection |
-| `toCoverKeyTopics(topics)` | Keyword coverage scoring |
+| `toContainKeywords(keywords)` | Required-keyword presence |
 
 ### Tier 3 — Model-as-Judge
 
@@ -563,24 +561,14 @@ const { evaluation } = evaluateCiRun({
 process.exitCode = emitActionResult(evaluation);  // outputs + summary + exit
 ```
 
-It runs four independent checks, no model-as-judge:
+It runs two independent checks, no model-as-judge:
 
 - **Completeness** (Tier 1) — is the output non-empty, substantive, and not a
   stub / truncated / refusal? The bytes are the bytes; the agent can't forge
   "non-empty".
-- **Keyword coverage** (Tier 2) — does the output cover the topics the *prompt*
-  asked about? (recall) The prompt is the reference the agent never authored, so
-  it can't grade its own coverage. Coverage at/under `ignoredPromptThreshold` is
-  a hard fail — this is the *"posted the guidance file verbatim instead of a
-  review"* failure mode.
-- **Relevance** (Tier 2) — the *dual* of coverage: is the output *about* THIS
-  PR, or generic advice? (precision) It uses TF-IDF cosine similarity between
-  prompt and output, so it catches the subtler case coverage misses — an output
-  that name-drops the prompt's keywords but is mostly off-topic filler
-  ("drifting"). Similarity at/under `offTopicThreshold` is a hard fail.
 - **Staleness** (Tier 1) — the *no-op* detector: did the run emit anything a
-  human can **act on**? An output can be complete, cover the topics, and be
-  perfectly on-topic and *still* say nothing useful — the review that sits stale
+  human can **act on**? An output can be complete and perfectly on-topic and
+  *still* say nothing useful — the review that sits stale
   with no actionable output, the check abandoned mid-task, the prior comment
   reposted verbatim. The detector counts *concrete actionable artifacts* the
   agent produced — file references, line numbers, code suggestions, actionable
@@ -592,44 +580,39 @@ It runs four independent checks, no model-as-judge:
 
 | Knob | Meaning |
 |------|---------|
-| `coverageThreshold` | Min prompt-topic coverage `[0,1]` to pass (default `0.4`) |
-| `ignoredPromptThreshold` | At/under this coverage the run hard-fails as "ignored the prompt" (default `0.15`) |
-| `relevanceThreshold` | Min prompt similarity `[0,1]` to pass the relevance check (default `0.2`) |
-| `offTopicThreshold` | At/under this similarity the run hard-fails as off-topic (default `0.08`) |
 | `minActionableArtifacts` | Min distinct actionable-artifact kinds to pass staleness; below = thin/warn, zero on a non-trivial output = no-op/fail (default `2`) |
 | `previousOutput` | The prior comment for this target; when set, a verbatim repost is flagged as a no-op |
 | `timeline` | Optional run timeline (`startedAt`/`endedAt`/`timeoutMs`/`events`); folds in timeout / abandonment detection |
 | `worker` | Logical name for the run (shown in outputs/summary; default `ci-run`) |
 | `action` | `gate` / `minScore` / `noData` forwarded to the gate (default gate `watch`) |
 
-Why four checks, and why do they *all* matter? They catch genuinely different
-failures and diverge in practice:
+Why these two checks, and why do they *both* matter? They catch genuinely
+different failures and diverge in practice:
 
-- Coverage vs. relevance are recall vs. precision: an output that lists the
-  prompt's keywords once then pads with 80% generic advice **passes coverage**
-  (topics present) but **fails relevance** (mostly off-topic).
-- Staleness is orthogonal to both: an on-topic response that names every topic
+- Completeness sees structure: it fails the empty / stub / truncated / refusal
+  output the bytes alone reveal.
+- Staleness is orthogonal: an on-topic response that names every topic
   but contains no file ref, no code, no directive — *"this looks reasonable, nice
-  work"* — **passes completeness, coverage, and relevance**, yet **fails
+  work"* — **passes completeness**, yet **fails
   staleness** because there is nothing to act on. That is exactly the
   review-sits-stale / nothing-actionable mode a crash check (exit 0) can't see.
 
-Any one failing trips the gate.
+Either one failing trips the gate.
 
 See [`examples/ci-single-run.ts`](examples/ci-single-run.ts) for a runnable
-example (good review passes; boilerplate-posted-verbatim and generic-advice
-outputs fail on coverage/relevance; an on-topic no-op fails on staleness alone).
+example (good review passes; an empty/stub output fails completeness; an
+on-topic no-op fails on staleness alone).
 
 ### Wiring it to `claude-code-action`
 
-Those same four checks plug directly into
+Those same two checks plug directly into
 [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action):
 its run writes a JSON execution log (the `execution_file` output) that already
 contains the agent's final output and run timeline.
 [`extractCcaRunFromFile`](src/action/cca-execution.ts) projects that file into
 the `{ prompt, output, timeline }` `evaluateCiRun` expects, so a downstream CI
-step can gate the job on *what the agent produced* — completeness, coverage,
-relevance, and no-op detection — with no model-as-judge and no extra API cost.
+step can gate the job on *what the agent produced* — completeness and no-op
+detection — with no model-as-judge and no extra API cost.
 
 See [`docs/claude-code-action-integration.md`](docs/claude-code-action-integration.md)
 for the exact seam (both an out-of-process downstream step and an in-process

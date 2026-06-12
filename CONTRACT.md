@@ -7,13 +7,13 @@ run transcript and agent-eval, which *consumes* it (parses, validates, scores).
 
 You can satisfy this contract three ways, in increasing order of guarantee:
 
-1. **Custom instructions** — paste the [instruction block](#agent-instruction-block)
+1. **Custom instructions** â€” paste the [instruction block](#agent-instruction-block)
    below into your agent's system prompt. Lowest friction; works with any agent
    and no extra tooling.
-2. **Validate in CI** — run [`agent-eval validate`](#validating) on the
+2. **Validate in CI** â€” run [`agent-eval validate`](#validating) on the
    transcripts your agent writes, so a non-compliant transcript fails loudly
    instead of being silently mis-scored.
-3. **Generate them** — have a tool (e.g. AgentLens) emit transcripts directly to
+3. **Generate them** â€” have a tool (e.g. AgentLens) emit transcripts directly to
    this schema, so compliance is guaranteed by construction. Use both for maximum
    effectiveness; neither is required to use the other.
 
@@ -82,16 +82,16 @@ pass - <one-line reason>
 
 ### Outcome token rules (the #1 source of drift)
 
-- ✅ `pass - 2/2 tasks complete and pushed`
-- ✅ `fail - the upstream API was down`
-- ✅ `partial - fixed 1 of 2 repos`
-- ✅ `**PASS** - ...`, `` `pass` ``, `✅ PASS - ...` are tolerated (the parser
-  strips leading emphasis/emoji) — but the **bare token is preferred**.
-- ❌ `mostly worked`, `done-ish`, `see above` — won't resolve to a token and
+- âœ… `pass - 2/2 tasks complete and pushed`
+- âœ… `fail - the upstream API was down`
+- âœ… `partial - fixed 1 of 2 repos`
+- âœ… `**PASS** - ...`, `` `pass` ``, `âœ… PASS - ...` are tolerated (the parser
+  strips leading emphasis/emoji) â€” but the **bare token is preferred**.
+- âŒ `mostly worked`, `done-ish`, `see above` â€” won't resolve to a token and
   fails validation.
 
 Use `pass` only when the work genuinely completed. `partial` and `fail`
-transcripts are the **most valuable** eval data — never inflate the outcome.
+transcripts are the **most valuable** eval data â€” never inflate the outcome.
 
 ### Sub-structure
 
@@ -104,7 +104,7 @@ list items are still counted. Only `##` starts a new top-level section.
 ## Run lifecycle (write the stub FIRST)
 
 The single most valuable transcript is the one written by a run that later
-**died** — without it, the failure is invisible.
+**died** â€” without it, the failure is invisible.
 
 1. **At the start of the run**, immediately write the file with `## Task` filled
    in and `## Outcome` set to `IN-PROGRESS`. This guarantees a record exists even
@@ -116,7 +116,7 @@ The single most valuable transcript is the one written by a run that later
 
 `IN-PROGRESS` is accepted by default (it's a valid not-yet-finished stub). When
 you validate **finished** runs (e.g. in CI after the run completes), pass
-`--finished` and any transcript still stuck at `IN-PROGRESS` becomes an error —
+`--finished` and any transcript still stuck at `IN-PROGRESS` becomes an error â€”
 that's how you detect runs that died mid-flight. As with `pass`/`fail`/`partial`,
 only the **leading token** of the `## Outcome` line decides this: a finished run
 that merely *mentions* the phrase in its reason prose (e.g.
@@ -141,7 +141,7 @@ agent-eval validate transcripts/ --json
 ```
 
 Exit code is `0` when everything is valid, `1` when any transcript has an
-error-severity violation — so it drops straight into CI.
+error-severity violation â€” so it drops straight into CI.
 
 Programmatic API:
 
@@ -161,15 +161,14 @@ There are two distinct evaluation surfaces, and they answer different questions:
 | | `validate` (this contract) | `scoreTranscript` (quality monitoring) |
 |---|---|---|
 | Asks | *Is this a well-formed, finished transcript?* | *How good was the run?* |
-| Verdict | a **gate** — exit `0` / `1`; one error-severity violation fails | a mix of **gates** and **grades** across checks |
+| Verdict | a **gate** — exit `0` / `1`; one error-severity violation fails | **gates** across deterministic, forge-proof checks |
 | Use | CI compliance bar | trend dashboards, regression spotting |
 
-Within `scoreTranscript`, each check is itself either a **gate** or a **grade**:
+Within `scoreTranscript`, every check is a **gate** — a deterministic signal the worker cannot forge after the fact:
 
-- **Gates** (`completeness`, `staleness`, `verification`, …) ask *did the agent do the thing?* — they may emit `fail`.
-- **Grades** (`relevance`, `keyword-coverage`) ask *how well does the output match the task?* — they report a 0–1 score and cap at `warn`. **A low grade is information, not a failure**, so it never inflates the failure count or fails a gate on its own.
+- **Gates** (`completeness`, `staleness`, `verification`) ask *did the agent do the thing?* — they may emit `fail`. A check that cannot run for a given transcript (e.g. `verification` with no run metadata) is emitted as `skip` and left out of the roll-up rather than counted against the score.
 
-The `## Outcome` token in this contract (`pass`/`fail`/`partial`) is the **agent's own self-report** of the run — a *third* thing again, independent of both the validator and the scorer. The `verification` gate exists precisely to catch when that self-report disagrees with ground truth (the agent claims `pass` but the orchestrator recorded an error).
+The `## Outcome` token in this contract (`pass`/`fail`/`partial`) is the **agent's own self-report** of the run â€” a *third* thing again, independent of both the validator and the scorer. The `verification` gate exists precisely to catch when that self-report disagrees with ground truth (the agent claims `pass` but the orchestrator recorded an error).
 
 ---
 
@@ -185,17 +184,17 @@ agent emit contract-compliant transcripts with no other tooling required.
 > title and these sections, in order:
 >
 > - `# <Name> Run - YYYY-MM-DD HH:mm <TZ>` (title)
-> - `## Task` — the task you were given
-> - `## Actions Taken` — a **numbered list** of what you actually did
-> - `## Key Outputs` — the concrete deliverables (commit SHAs, files, links)
-> - `## Outcome` — a line that **starts with one bare token**: `pass`, `fail`,
+> - `## Task` â€” the task you were given
+> - `## Actions Taken` â€” a **numbered list** of what you actually did
+> - `## Key Outputs` â€” the concrete deliverables (commit SHAs, files, links)
+> - `## Outcome` â€” a line that **starts with one bare token**: `pass`, `fail`,
 >   or `partial`, optionally followed by ` - <reason>`. Do not wrap it in bold
 >   or prose; do not invent other words.
-> - `## Errors & Retries` — any errors you recovered from (omit if none)
-> - `## Duration` — e.g. `10:00 PT -> 10:14 PT (14 minutes)`
+> - `## Errors & Retries` â€” any errors you recovered from (omit if none)
+> - `## Duration` â€” e.g. `10:00 PT -> 10:14 PT (14 minutes)`
 >
 > If you hit a fatal error, set `## Outcome` to `fail - <error>` before stopping.
-> Never finish — success or failure — without this transcript on disk. Use
+> Never finish â€” success or failure â€” without this transcript on disk. Use
 > `partial`/`fail` honestly; do not report `pass` unless the work truly completed.
 
 ---

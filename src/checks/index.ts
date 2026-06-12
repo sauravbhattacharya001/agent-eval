@@ -155,29 +155,6 @@ export type {
 } from './staleness.js';
 
 export {
-  // Relevance assertions (Tier 2 — Heuristic)
-  toBeRelevantTo,
-  toNotDriftFrom,
-  toHaveTopicOverlap,
-  toBeOnTopic,
-  // Utilities
-  analyzeRelevance,
-  cosineSimilarity,
-  vectorize,
-  extractTopics,
-  topicOverlap,
-} from './relevance.js';
-
-export type {
-  RelevanceOptions,
-  RelevanceResult,
-  ScoredTerm,
-  SectionRelevance,
-  TopicExtractionOptions,
-  ExtractedTopic,
-} from './relevance.js';
-
-export {
   // Repetition/Loop detection assertions (Tier 2 — Heuristic)
   toNotRepeat,
   toNotLoop,
@@ -208,29 +185,6 @@ export type {
   FullRepetitionOptions,
   FullRepetitionResult,
 } from './repetition.js';
-
-export {
-  // Keyword Coverage Scoring assertions (Tier 2 — Heuristic)
-  toCoverKeyTopics,
-  toHaveNoTopicGaps,
-  toMeetKeywordScore,
-  toHaveBalancedCoverage,
-  toAddressTask,
-  // Utilities
-  extractKeyTerms,
-  scoreKeywordCoverage,
-  identifyTopicGaps,
-} from './keyword-coverage.js';
-
-export type {
-  KeywordCoverageScoringOptions,
-  ExtractedKeyword,
-  KeywordCoverageScore,
-  SectionCoverageResult,
-  TopicGapOptions,
-  TopicGap,
-  TopicGapResult,
-} from './keyword-coverage.js';
 
 export {
   // Judge framework (Tier 3 — Shared-Substrate Judgment)

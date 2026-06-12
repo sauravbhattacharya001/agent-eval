@@ -137,16 +137,6 @@ export {
   detectAbandonment,
   analyzeProgress,
   analyzeStaleness,
-  // Relevance (Tier 2 — Heuristic)
-  toBeRelevantTo,
-  toNotDriftFrom,
-  toHaveTopicOverlap,
-  toBeOnTopic,
-  analyzeRelevance,
-  cosineSimilarity,
-  vectorize,
-  extractTopics,
-  topicOverlap,
   // Repetition/Loop detection (Tier 2 — Heuristic)
   toNotRepeat,
   toNotLoop,
@@ -207,12 +197,6 @@ export type {
   ProgressOptions,
   StalenessResult,
   StalenessIssue,
-  RelevanceOptions,
-  RelevanceResult,
-  ScoredTerm,
-  SectionRelevance,
-  TopicExtractionOptions,
-  ExtractedTopic,
   RepetitionOptions,
   RepetitionInstance,
   RepetitionKind,
@@ -228,27 +212,6 @@ export type {
 
 // Helpers
 export { defineEval } from './define.js';
-
-// Keyword Coverage Scoring (Tier 2 — Heuristic)
-export {
-  toCoverKeyTopics,
-  toHaveNoTopicGaps,
-  toMeetKeywordScore,
-  toHaveBalancedCoverage,
-  toAddressTask,
-  extractKeyTerms,
-  scoreKeywordCoverage,
-  identifyTopicGaps,
-} from './checks/index.js';
-export type {
-  KeywordCoverageScoringOptions,
-  ExtractedKeyword,
-  KeywordCoverageScore,
-  SectionCoverageResult,
-  TopicGapOptions,
-  TopicGap,
-  TopicGapResult,
-} from './checks/index.js';
 
 // Judge Framework (Tier 3 — Shared-Substrate Judgment)
 export {

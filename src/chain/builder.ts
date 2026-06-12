@@ -18,7 +18,7 @@
  *       .build(),
  *     step('follow-up')
  *       .prompt((ctx) => `Now explain this part in more detail: "${ctx.outputs[0]?.slice(0, 100)}"`)
- *       .assert(toBeRelevantTo('quantum computing'))
+ *       .assert(toBeNonEmpty())
  *       .build(),
  *     step('verify')
  *       .prompt((ctx) => `Does this explanation contain errors? "${ctx.namedOutputs['follow-up']}"`)

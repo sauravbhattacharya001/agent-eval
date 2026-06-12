@@ -249,8 +249,8 @@ describe('extractCcaRunFromFile → evaluateCiRun', () => {
       now: FIXED_NOW,
     });
     expect(evaluation.passed).toBe(true);
-    // All four checks present and none failing.
-    expect(checks).toHaveLength(4);
+    // Both checks present and none failing.
+    expect(checks).toHaveLength(2);
     expect(checks.every((c) => c.status !== 'fail')).toBe(true);
     // The evaluation is the standard ActionEvaluation shape (drops into emit /
     // toActionOutputs unchanged).
@@ -298,7 +298,7 @@ describe('extractCcaRunFromFile → evaluateCiRun', () => {
       timeline: x.timeline,
       now: FIXED_NOW,
     });
-    // On-topic enough to clear coverage/relevance, but no actionable artifacts.
+    // Substantive prose, but no concrete actionable artifacts.
     expect(staleness.artifacts.count).toBeLessThan(2);
     expect(evaluation.passed).toBe(false);
   });

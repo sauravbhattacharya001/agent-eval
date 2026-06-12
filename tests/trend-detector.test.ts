@@ -338,8 +338,7 @@ describe('detectTrends - bucketing and roll-ups', () => {
       }),
       ...series([0.4, 0.4, 0.4, 0.4, 0.9, 0.9, 0.9, 0.9], {
         worker: 'builder',
-        check: 'relevance',
-        tier: 2,
+        check: 'verification',
       }),
       ...series([0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8, 0.8], {
         worker: 'gardener',
@@ -351,7 +350,7 @@ describe('detectTrends - bucketing and roll-ups', () => {
     const gardener = report.workers.find((w) => w.worker === 'gardener');
     expect(builder?.trends).toHaveLength(2);
     expect(builder?.trends.find((t) => t.check === 'completeness')?.direction).toBe('degrading');
-    expect(builder?.trends.find((t) => t.check === 'relevance')?.direction).toBe('improving');
+    expect(builder?.trends.find((t) => t.check === 'verification')?.direction).toBe('improving');
     expect(gardener?.trends[0].direction).toBe('stable');
     expect(gardener?.degradations).toHaveLength(0);
   });
@@ -382,8 +381,7 @@ describe('detectTrends - bucketing and roll-ups', () => {
       }),
       ...series([0.95, 0.95, 0.95, 0.95, 0.2, 0.2, 0.2, 0.2], {
         worker: 'b',
-        check: 'relevance',
-        tier: 2,
+        check: 'verification',
       }),
     ];
     const report = detectTrends(rows);

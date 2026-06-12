@@ -46,7 +46,7 @@ function check(spec: CheckSpec, worker: string, runId: string, ms: number): Chec
     startedAt: new Date(ms).toISOString(),
     startedAtMs: ms,
     check: spec.check,
-    tier: spec.check === 'relevance' || spec.check === 'keyword-coverage' ? 2 : 1,
+    tier: spec.check === 'verification' || spec.check === 'verification' ? 2 : 1,
     score: spec.score,
     status: spec.status,
     summary: `${spec.check}=${spec.score}`,
@@ -90,7 +90,7 @@ function passingRun(worker: string, dayOffset: number): TranscriptScore {
   return transcriptScore(worker, dayOffset, [
     { check: 'staleness', score: 1, status: 'pass' },
     { check: 'completeness', score: 1, status: 'pass' },
-    { check: 'relevance', score: 0.5, status: 'pass' },
+    { check: 'verification', score: 0.5, status: 'pass' },
   ]);
 }
 
@@ -102,7 +102,7 @@ function failingRun(worker: string, dayOffset: number, failed: CheckName = 'comp
     [
       { check: 'staleness', score: 1, status: 'pass' },
       { check: failed, score: 0, status: 'fail' },
-      { check: 'relevance', score: 0.5, status: 'pass' },
+      { check: 'verification', score: 0.5, status: 'pass' },
     ],
     'partial',
   );
@@ -217,7 +217,7 @@ describe('aggregateScorecard - grading & pass rate', () => {
   });
 
   it('marks a worker with no finite scores as no-data', () => {
-    const ts = transcriptScore('blog', 0, [{ check: 'relevance', score: 0, status: 'skip' }]);
+    const ts = transcriptScore('blog', 0, [{ check: 'verification', score: 0, status: 'skip' }]);
     const card = aggregateScorecard([ts], { now: FIXED_NOW });
     const w = card.workers[0]!;
     expect(w.grade).toBe('no-data');
@@ -232,12 +232,12 @@ describe('aggregateScorecard - failure categories & breakdown', () => {
     const scores = [
       failingRun('builder', 0, 'completeness'),
       failingRun('builder', 1, 'completeness'),
-      failingRun('builder', 2, 'relevance'),
+      failingRun('builder', 2, 'verification'),
     ];
     const card = aggregateScorecard(scores, { now: FIXED_NOW });
     const cats = card.workers[0]!.failureCategories;
     expect(cats[0]).toEqual({ check: 'completeness', count: 2 });
-    expect(cats[1]).toEqual({ check: 'relevance', count: 1 });
+    expect(cats[1]).toEqual({ check: 'verification', count: 1 });
   });
 
   it('builds a per-check breakdown sorted by worst mean score', () => {
@@ -245,12 +245,12 @@ describe('aggregateScorecard - failure categories & breakdown', () => {
       transcriptScore('gardener', 0, [
         { check: 'staleness', score: 1, status: 'pass' },
         { check: 'completeness', score: 0.2, status: 'fail' },
-        { check: 'relevance', score: 0.8, status: 'pass' },
+        { check: 'verification', score: 0.8, status: 'pass' },
       ]),
       transcriptScore('gardener', 1, [
         { check: 'staleness', score: 1, status: 'pass' },
         { check: 'completeness', score: 0.4, status: 'warn' },
-        { check: 'relevance', score: 0.6, status: 'pass' },
+        { check: 'verification', score: 0.6, status: 'pass' },
       ]),
     ];
     const card = aggregateScorecard(scores, { now: FIXED_NOW });
@@ -269,7 +269,7 @@ describe('aggregateScorecard - failure categories & breakdown', () => {
     const scores = [
       transcriptScore('eval', 0, [
         { check: 'completeness', score: 1, status: 'pass' },
-        { check: 'relevance', score: 0, status: 'skip' },
+        { check: 'verification', score: 0, status: 'skip' },
       ]),
     ];
     const card = aggregateScorecard(scores, { now: FIXED_NOW });
@@ -442,9 +442,9 @@ describe('formatScorecard', () => {
   it('caps the failure list at maxFailures', () => {
     const scores = [
       failingRun('b', 0, 'completeness'),
-      failingRun('b', 1, 'relevance'),
+      failingRun('b', 1, 'verification'),
       failingRun('b', 2, 'staleness'),
-      failingRun('b', 3, 'keyword-coverage'),
+      failingRun('b', 3, 'verification'),
     ];
     const card = aggregateScorecard(scores, { now: FIXED_NOW });
     const out = formatScorecard(card, { maxFailures: 2 });

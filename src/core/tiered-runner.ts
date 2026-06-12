@@ -154,7 +154,7 @@ export function classifyAssertions(
  *   // Tier 2 — cheap
  *   toNotHallucinate(refs),
  *   toNotRepeat(),
- *   toBeRelevantTo(task),
+ *   toNotBeSaturated(),
  *   // Tier 3 — expensive
  *   toPassJudge(backend, rubric),
  * ], { prompt: task });

@@ -38,7 +38,7 @@ I couldn't find a framework that tested these. So I built one.
             │  (expensive) │  LLM evaluates LLM output
             ├──────────────┤
             │   Tier 2     │  Statistical / Heuristic
-            │   (cheap)    │  Repetition, relevance, staleness
+            │   (cheap)    │  Repetition, saturation, staleness
             ├──────────────┤
             │   Tier 1     │  Deterministic
             │   (free)     │  String matching, structure checks
@@ -297,7 +297,7 @@ Key features:
 - **4 LLM backends:** Groq, Gemini, Azure OpenAI, OpenRouter
 - **Full agentic loop:** Multi-turn tool calling with timeline capture
 - **Fluent tool builder:** `defineTool().describe().param().execute()`
-- **Built-in assertions:** `toBeNonEmpty`, `toNotRepeat`, `toNotBeSaturated`, `toBeRelevantTo`, `toPassJudge`
+- **Built-in assertions:** `toBeNonEmpty`, `toNotRepeat`, `toNotBeSaturated`, `toPassJudge`
 - **Rubric builder:** `buildRubric().criterion().level().weight().build()`
 - **Consensus judging:** Multiple judge samples with median scoring
 - **926 unit tests**

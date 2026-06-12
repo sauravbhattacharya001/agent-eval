@@ -5,7 +5,7 @@ transcripts produced by long-lived agent workers. This is the foundation for
 historical scoring, trend detection, and weekly scorecards: parse first, score
 later.
 
-The reader is deterministic Tier 1 — pure parsing, no AI, no network.
+The reader is deterministic Tier 1 - pure parsing, no AI, no network.
 
 ## Transcript format
 
@@ -25,10 +25,10 @@ Filenames embed the run start time as `YYYY-MM-DD-HHmm.md`. Each file has
 this shape:
 
 ```markdown
-# <Worker> Run — YYYY-MM-DD HH:mm PT
+# <Worker> Run - YYYY-MM-DD HH:mm PT
 
 ## Task
-…
+...
 
 ## Actions Taken
 1. step one
@@ -42,7 +42,7 @@ this shape:
 pass | fail | partial
 
 ## Errors & Retries
-…
+...
 
 ## Duration
 ~15 minutes
@@ -127,12 +127,12 @@ or any of the existing assertion factories against `tl`.
 The parser exposes its building blocks for power users:
 
 - `extractTitle(lines)`
-- `extractSections(lines)` — returns one `TranscriptSection` per `## …` heading
-- `extractListItems(body)` — numbered / bulleted lists with continuation folding
-- `parseOutcome(body)` — `'pass' | 'fail' | 'partial' | 'unknown'`
-- `parseDuration(body)` — handles `~15 minutes`, `1h 23m 4s`, `18:00 - 18:14 PT`, bare numbers. A clock-time **range** (`HH:mm … HH:mm`) wins over loose `N min` tokens, since transcripts often pair an exact headline range with approximate sub-durations.
-- `extractTranscriptReferences(sections)` — surface commit SHAs, file paths, URLs, issue numbers
-- `slugifyHeading(heading)` — deterministic section slugger
+- `extractSections(lines)` - returns one `TranscriptSection` per `## ...` heading
+- `extractListItems(body)` - numbered / bulleted lists with continuation folding
+- `parseOutcome(body)` - `'pass' | 'fail' | 'partial' | 'unknown'`
+- `parseDuration(body)` - handles `~15 minutes`, `1h 23m 4s`, `18:00 - 18:14 PT`, bare numbers. A clock-time **range** (`HH:mm ... HH:mm`) wins over loose `N min` tokens, since transcripts often pair an exact headline range with approximate sub-durations.
+- `extractTranscriptReferences(sections)` - surface commit SHAs, file paths, URLs, issue numbers
+- `slugifyHeading(heading)` - deterministic section slugger
 
 ## Design notes
 
@@ -141,7 +141,7 @@ The parser exposes its building blocks for power users:
   reader never fails on UTF-8 input.
 - **Identity inference.** Worker name comes from (in order) the explicit
   option, the parent directory name, or the title prefix. Start time is
-  parsed from the filename — workers generate filenames programmatically, so
+  parsed from the filename - workers generate filenames programmatically, so
   this is the most reliable signal.
 - **Pacific timezone.** The transcript convention uses PT wall-clock times.
   The reader emits ISO timestamps with a fixed `-07:00` offset by default.
@@ -158,20 +158,19 @@ parsed transcripts and persists one score row per check to
 layered on top of the transcript reader, and feeds the trend detector and
 weekly scorecard.
 
-It is fully offline and reproducible — **no model-as-judge**. The four checks it
+It is fully offline and reproducible — **no model-as-judge**. The three checks it
 runs are exactly the ones the worker cannot forge or influence after the fact:
 
 | Check | Tier | Source check | What it measures |
 | --- | --- | --- | --- |
 | `staleness` | 1 | `detectTimeout` | Did the run finish within its timeout budget? |
 | `completeness` | 1 | `checkCompleteness` | Did it produce real deliverables vs. empty/stub output? |
-| `relevance` | 2 | `analyzeRelevance` | Does the output topic match the task (TF-IDF cosine)? |
-| `keyword-coverage` | 2 | `scoreKeywordCoverage` | Did it touch the key topics named in the task? |
+| `verification` | 1 | `analyzeStaleness` | Do the transcript's claims match the run metadata (duration, outcome)? |
 
-`relevance` and `keyword-coverage` both need a `## Task` section as the
-reference point. When a transcript has no task, those two checks are emitted
-with `status: 'skip'` and excluded from the roll-up rather than dropped — so a
-missing task never silently inflates or deflates a score.
+`verification` needs run metadata as its reference point. When a transcript has
+none, the check is emitted with `status: 'skip'` and excluded from the roll-up
+rather than dropped - so a missing reference never silently inflates or deflates
+a score.
 
 > **Independence note.** The reference point each check compares against (the
 > timeout budget, the task text, the expected-output heuristics) is something
@@ -191,7 +190,7 @@ for (const s of result.scores) {
 }
 ```
 
-Filter by worker, rolling window, explicit dates, or limit — and dry-run
+Filter by worker, rolling window, explicit dates, or limit - and dry-run
 without writing:
 
 ```ts
@@ -215,9 +214,9 @@ import { loadTranscript, scoreTranscript } from 'agent-eval';
 
 const t = loadTranscript('./transcripts/sentinel/2026-06-08-1815.md');
 const score = scoreTranscript(t, { timeoutMs: 45 * 60_000 });
-// score.overall   — mean of non-skipped check scores (0..1)
-// score.worst     — lowest non-skipped check score
-// score.checks[]  — one CheckScore per check, each with score/status/summary
+// score.overall   - mean of non-skipped check scores (0..1)
+// score.worst     - lowest non-skipped check score
+// score.checks[]  - one CheckScore per check, each with score/status/summary
 ```
 
 ### API surface
@@ -234,13 +233,13 @@ const score = scoreTranscript(t, { timeoutMs: 45 * 60_000 });
 | `upsertScores(existing, incoming)` | `scores-store` | Merge by `(worker, runId, check)` key. |
 
 `ScoreTranscriptOptions` accepts `timeoutMs` (a single budget or a per-worker
-map), `minOutputWords`, `relevanceThreshold`, `coverageThreshold`, and `now`
-(for deterministic `scoredAt` in tests). Each surfaces as a tunable threshold
-so scoring stays explicit rather than magic.
+map), `minOutputWords`, `runMetadata` (ground-truth run record for the
+`verification` check), and `now` (for deterministic `scoredAt` in tests). Each
+surfaces as a tunable knob so scoring stays explicit rather than magic.
 
 ### Storage format
 
-One JSON object per line — crash-safe, greppable, cheap to append:
+One JSON object per line - crash-safe, greppable, cheap to append:
 
 ```jsonl
 {"worker":"sentinel","runId":"2026-06-08-1815","check":"staleness","tier":1,"score":1,"status":"pass","summary":"ok (17.0m)",...}
@@ -257,7 +256,7 @@ read, so a half-written final line never corrupts the history.
   owns JSONL persistence, and `score-runner.ts` orchestrates the pipeline. Each
   is independently testable.
 - **Per-file failure isolation.** `scoreHistory` captures parse/score errors
-  per transcript on `result.errors` (with a `result.failed` count) — one corrupt
+  per transcript on `result.errors` (with a `result.failed` count) - one corrupt
   file never aborts the batch.
 - **Reuse, don't re-implement.** The scorer calls the same check functions the
   live runner uses, so a transcript scores identically whether checked at

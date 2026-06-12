@@ -17,7 +17,7 @@ import {
   AgentProvider, defineTool, runTiered,
   tier1, tier2, tier3,
   toBeNonEmpty, toNotBeAbandoned, toHaveMeaningfulDiff,
-  toBeRelevantTo, toNotRepeat, toNotBeStale,
+  toNotRepeat, toNotBeStale,
   toPassJudge, toNotLoop, toNotBeSaturated,
   buildRubric, LLMJudgeBackend,
 } from '../src/index.js';
@@ -234,7 +234,6 @@ const scenarios: Scenario[] = [
       { tier: 2, assertion: toNotTrustReadme() },
       { tier: 2, assertion: toFindCORSIssue() },
       { tier: 2, assertion: toNotRepeat() },
-      { tier: 2, assertion: toBeRelevantTo({ task: 'security audit vulnerability SQL injection hardcoded secret CORS', threshold: 0.03 }) },
     ],
   },
   {

@@ -169,8 +169,6 @@ describe('scoreTranscript', () => {
     expect(result.runId).toBe('2026-06-08-1815');
     expect(result.checks.map((c) => c.check).sort()).toEqual([
       'completeness',
-      'keyword-coverage',
-      'relevance',
       'staleness',
       'verification',
     ]);
@@ -190,8 +188,7 @@ describe('scoreTranscript', () => {
     const byCheck = Object.fromEntries(scoreTranscript(t).checks.map((c) => [c.check, c.tier]));
     expect(byCheck.staleness).toBe(1);
     expect(byCheck.completeness).toBe(1);
-    expect(byCheck.relevance).toBe(2);
-    expect(byCheck['keyword-coverage']).toBe(2);
+    expect(byCheck.verification).toBe(1);
   });
 
   it('passes staleness for a healthy run within budget', () => {
@@ -255,24 +252,6 @@ describe('scoreTranscript', () => {
     expect(complete.score).toBeGreaterThanOrEqual(0.9);
   });
 
-  it('scores relevance for an on-task run above the default threshold', () => {
-    const t = parse(GOOD_TRANSCRIPT, '2026-06-08-1815.md');
-    const rel = scoreTranscript(t).checks.find((c) => c.check === 'relevance')!;
-    expect(rel.status).not.toBe('skip');
-    expect(rel.score).toBeGreaterThan(0);
-    expect(typeof rel.detail?.similarity).toBe('number');
-  });
-
-  it('skips relevance and coverage when there is no Task section', () => {
-    const t = parse(NO_TASK_TRANSCRIPT, '2026-06-09-1200.md');
-    const result = scoreTranscript(t);
-    const rel = result.checks.find((c) => c.check === 'relevance')!;
-    const cov = result.checks.find((c) => c.check === 'keyword-coverage')!;
-    expect(rel.status).toBe('skip');
-    expect(cov.status).toBe('skip');
-    expect(rel.detail?.skipped).toBe(true);
-  });
-
   it('excludes skipped checks from the roll-up', () => {
     const t = parse(NO_TASK_TRANSCRIPT, '2026-06-09-1200.md');
     const result = scoreTranscript(t);
@@ -325,7 +304,7 @@ describe('scoreTranscripts + toScoreRows', () => {
     const a = parse(GOOD_TRANSCRIPT, '2026-06-08-1815.md');
     const b = parse(NO_TASK_TRANSCRIPT, '2026-06-09-1200.md');
     const rows = toScoreRows(scoreTranscripts([a, b]));
-    expect(rows.length).toBe(10); // 5 checks x 2 transcripts
+    expect(rows.length).toBe(6); // 3 checks x 2 transcripts
     expect(rows[0]?.check).toBe('staleness');
   });
 });
@@ -351,11 +330,11 @@ describe('scores-store serialization', () => {
       '   ',
       '{ not valid json',
       JSON.stringify({ missing: 'fields' }),
-      JSON.stringify(sampleRow({ check: 'relevance', tier: 2 })),
+      JSON.stringify(sampleRow({ check: 'verification', tier: 1 })),
     ].join('\n');
     const rows = parseScoresJsonl(text);
     expect(rows.length).toBe(2);
-    expect(rows.map((r) => r.check)).toEqual(['staleness', 'relevance']);
+    expect(rows.map((r) => r.check)).toEqual(['staleness', 'verification']);
   });
 
   it('builds a stable dedupe key', () => {
@@ -522,19 +501,19 @@ describe('scoreHistory', () => {
     const res = scoreHistory(root);
     expect(res.discovered).toBeGreaterThanOrEqual(3);
     expect(res.scored).toBeGreaterThanOrEqual(3);
-    expect(res.rows.length).toBe(res.scored * 5);
+    expect(res.rows.length).toBe(res.scored * 3);
     // files written
     const sentinelScores = readScores(scoresPathFor(root, 'sentinel'));
-    expect(sentinelScores.length).toBe(10); // 2 runs x 5 checks
+    expect(sentinelScores.length).toBe(6); // 2 runs x 3 checks
     const gardenerScores = readScores(scoresPathFor(root, 'gardener'));
-    expect(gardenerScores.length).toBeGreaterThanOrEqual(4);
+    expect(gardenerScores.length).toBeGreaterThanOrEqual(3);
   });
 
   it('is idempotent: re-running upserts instead of duplicating', () => {
     scoreHistory(root);
     scoreHistory(root);
     const sentinelScores = readScores(scoresPathFor(root, 'sentinel'));
-    expect(sentinelScores.length).toBe(10); // still 10, not 20/30
+    expect(sentinelScores.length).toBe(6); // still 6, not 12/18
   });
 
   it('does not write when persist is false', () => {
@@ -596,14 +575,12 @@ describe('scoreHistory', () => {
   });
 });
 
-describe('Tier 2 is grading, not gating', () => {
-  // Principle (regression): Tier 1 checks GATE (did the agent do the thing? ->
-  // pass/fail). Tier 2 checks GRADE (how well does output match task? -> a 0-1
-  // score). A low grade must surface as a low score + at most `warn`, never
-  // `fail` - otherwise a grading signal contaminates failCount and the gate
-  // verdict. Found by scoring a real SWE-agent HumanEvalFix run whose prompt
-  // ("I have a function with a bug, can you help?") was contentless, yielding
-  // relevance=0.00 / coverage=0.00 that were wrongly escalated to `fail`.
+describe('contentless prompt does not inflate failCount', () => {
+  // Principle (regression): a structurally complete, on-task run must not be
+  // counted as a failure just because its prompt was contentless. Tier 1 checks
+  // GATE (did the agent do the thing? -> pass/fail); none of them should trip
+  // here. Found by scoring a real SWE-agent HumanEvalFix run whose prompt
+  // ("I have a function with a bug, can you help?") was contentless.
   const CONTENTLESS_PROMPT_RUN = `# SWE-agent HumanEvalFix python-0
 
 ## Task
@@ -628,34 +605,10 @@ pass - submitted a patch
 4 steps (wall-clock not recorded)
 `;
 
-  it('never emits `fail` from a Tier 2 check, even on a worst-case (0.00) grade', () => {
+  it('does not count a contentless-prompt run as a failure', () => {
     const t = parseTranscript(CONTENTLESS_PROMPT_RUN, { filename: 'swe-agent/hef-0.md' });
     const s = scoreTranscript(t);
-    const tier2 = s.checks.filter((c) => c.tier === 2);
-    expect(tier2.length).toBeGreaterThan(0);
-    for (const c of tier2) {
-      expect(c.status).not.toBe('fail');
-    }
-  });
-
-  it('still reports the low grade on the score gradient (information is not lost)', () => {
-    const t = parseTranscript(CONTENTLESS_PROMPT_RUN, { filename: 'swe-agent/hef-0.md' });
-    const s = scoreTranscript(t);
-    const relevance = s.checks.find((c) => c.check === 'relevance');
-    const coverage = s.checks.find((c) => c.check === 'keyword-coverage');
-    // The grade is a real, low number - reported, not suppressed.
-    expect(relevance?.score).toBeLessThan(0.12);
-    expect(coverage?.score).toBeLessThan(0.4);
-    // ...but it surfaces as warn, not fail.
-    expect(relevance?.status).toBe('warn');
-    expect(coverage?.status).toBe('warn');
-  });
-
-  it('does not let a low Tier 2 grade inflate failCount (no gate contamination)', () => {
-    const t = parseTranscript(CONTENTLESS_PROMPT_RUN, { filename: 'swe-agent/hef-0.md' });
-    const s = scoreTranscript(t);
-    // No Tier 1 gate failed here, so the run must not be counted as a failure
-    // purely because the heuristic grade was low.
+    // No Tier 1 gate failed here, so the run must not be counted as a failure.
     const tier1Fails = s.checks.filter((c) => c.tier === 1 && c.status === 'fail').length;
     expect(tier1Fails).toBe(0);
     expect(s.failCount).toBe(0);

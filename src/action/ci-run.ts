@@ -1,8 +1,8 @@
 /**
- * CI Single-Run Completeness Evaluator — Phase 4 CI Integration
+ * CI Single-Run Completeness Evaluator - Phase 4 CI Integration
  *
  * The action *adapter* projects a fleet {@link Scorecard} into a gate. This
- * module sharpens the signal that feeds a gate for **one CI run** — a single
+ * module sharpens the signal that feeds a gate for **one CI run** - a single
  * agent invocation against a single prompt (one PR review, one issue triage,
  * one code-change comment). It answers the narrow, high-value question a CI
  * Action actually has the inputs to answer at cleanup time:
@@ -14,41 +14,30 @@
  * a review that posts a project's guidance file verbatim instead of a structured
  * review of the diff, or a run that finishes "successfully" having said nothing
  * about the thing it was asked to look at. A crash check (`exit 0`) cannot see
- * either; a *completeness + coverage* check can.
+ * either; a *completeness + staleness* check can.
  *
  * Independence (the core axis is independent -> corruptible): every signal here
  * is Tier 1 / Tier 2 and computed from artifacts the evaluated agent did not get
- * to write the reference for —
+ * to write the reference for -
  *   - **Completeness** (Tier 1, {@link checkCompleteness}): pure structural
- *     analysis of the agent's own text — empty / stub / truncated / low-substance.
+ *     analysis of the agent's own text - empty / stub / truncated / low-substance.
  *     The agent cannot forge "non-empty"; the bytes are the bytes.
- *   - **Keyword coverage** (Tier 2, {@link scoreKeywordCoverage}): the *prompt*
- *     supplies the reference topics, and the agent never wrote the prompt. The
- *     agent cannot grade its own coverage because it didn't author the baseline.
- *   - **Relevance** (Tier 2, {@link analyzeRelevance}): the *dual* of coverage.
- *     Coverage is recall ("did the output mention what the prompt asked?");
- *     relevance is precision ("is the output *spending its words on* the prompt,
- *     or on generic advice / boilerplate filler?"). It is the exact tell for an
- *     output that name-drops the prompt's keywords but is mostly about something
- *     else — "is this review about THIS PR, not generic advice?" The prompt is,
- *     again, a reference the agent never authored, and TF-IDF cosine similarity
- *     is computed from the byte content, not from anything the agent controls.
- *   - **Staleness** (Tier 1, {@link scoreStaleness}): the failure mode the
- *     completeness/coverage/relevance trio *cannot* see — a run that responded,
+ *   - **Staleness** (Tier 1, {@link scoreStaleness}): the failure mode
+ *     completeness *cannot* see - a run that responded,
  *     on-topic, at length, but emitted **nothing a human can act on**. This is
  *     the open-issue cluster directly: a review that sits stale with no
  *     actionable output, a check abandoned mid-task, or a prior comment reposted
  *     verbatim with no new work. It is distinct from completeness (the output is
- *     non-empty, even substantive) and from relevance (it may be perfectly
- *     on-topic) — it is a **no-op**. The detector counts *concrete actionable
+ *     non-empty, even substantive) and **not** merely on-topic
+ *     - it is a **no-op**. The detector counts *concrete actionable
  *     artifacts* the agent did produce (file references, line numbers, code
  *     suggestions, actionable directives, structured review findings), flags
  *     pure-acknowledgement output ("LGTM", "looks good") below a substance floor,
  *     folds in {@link detectAbandonment} truncation/intent-without-follow-through
- *     signals, and — when given the prior comment and/or a run timeline —
+ *     signals, and - when given the prior comment and/or a run timeline -
  *     {@link detectParroting} verbatim-repost and {@link analyzeStaleness}
  *     timeout/abandonment. All of it is artifact pattern-counting and timestamp
- *     math; the "actionability" signal here is **not** a model-as-judge verdict —
+ *     math; the "actionability" signal here is **not** a model-as-judge verdict -
  *     it asks "are concrete artifacts *present*?", never "is this *good*?".
  * No model-as-judge, offline, reproducible.
  *
@@ -63,7 +52,7 @@
  * path the fleet uses. One run becomes a one-worker scorecard; the gate, the
  * outputs, and the rendered summary table all fall out for free.
  *
- * @tier 1+2 — Deterministic + Heuristic (no AI, reproducible, offline)
+ * @tier 1+2 - Deterministic + Heuristic (no AI, reproducible, offline)
  * @module
  */
 
@@ -84,18 +73,6 @@ import {
   type StalenessIssue,
   type StalenessResult,
 } from '../checks/staleness.js';
-import {
-  scoreKeywordCoverage,
-  identifyTopicGaps,
-  type KeywordCoverageScore,
-  type KeywordCoverageScoringOptions,
-  type TopicGapResult,
-} from '../checks/keyword-coverage.js';
-import {
-  analyzeRelevance,
-  type RelevanceOptions,
-  type RelevanceResult,
-} from '../checks/relevance.js';
 import { aggregateScorecard } from '../monitoring/scorecard.js';
 import type { CheckScore, TranscriptScore } from '../monitoring/scorer.js';
 
@@ -110,7 +87,7 @@ export type CiCheckStatus = 'pass' | 'fail' | 'warn';
 /** One scored check for a single CI run. */
 export interface CiCheckResult {
   /** Which check produced this (one of the canonical scorer check names). */
-  check: 'completeness' | 'keyword-coverage' | 'relevance' | 'staleness';
+  check: 'completeness' | 'staleness';
   /** Independence tier: 1 = deterministic, 2 = heuristic. */
   tier: 1 | 2;
   /** Normalized score in [0, 1], 1 = best. */
@@ -125,7 +102,7 @@ export interface CiCheckResult {
 
 /** Options for {@link evaluateCiRun}. */
 export interface EvaluateCiRunOptions {
-  /** The prompt / task the agent was given (PR title+body, issue text, …). */
+  /** The prompt / task the agent was given (PR title+body, issue text, ...). */
   prompt: string;
   /** The agent's output (the review, comment, or change summary it produced). */
   output: string;
@@ -134,38 +111,8 @@ export interface EvaluateCiRunOptions {
    * scorecard and in the summary. Default: `ci-run`.
    */
   worker?: string;
-  /**
-   * Minimum keyword-coverage score in [0, 1] to pass the coverage check.
-   * Default: 0.4 (CI prompts are often terse; a moderate bar catches "ignored
-   * the prompt entirely" without demanding exhaustive coverage).
-   */
-  coverageThreshold?: number;
-  /**
-   * Below this coverage score the run is treated as a hard failure to *address*
-   * the prompt (not just a warning). Default: 0.15 — at/under this the output is
-   * essentially unrelated to the task (e.g. boilerplate posted verbatim).
-   */
-  ignoredPromptThreshold?: number;
-  /**
-   * Minimum relevance (TF-IDF cosine similarity between prompt and output) in
-   * [0, 1] to pass the relevance check. Default: 0.2 — the same default the
-   * Tier 2 relevance assertion uses. Below this the output is mostly *not about*
-   * the prompt (generic advice / boilerplate that happens to be present).
-   */
-  relevanceThreshold?: number;
-  /**
-   * At/under this relevance score the run is a hard failure to be *about* the
-   * prompt (not just a warning). Default: 0.08 — at this level the output and
-   * the prompt share almost no weighted vocabulary, i.e. the output is generic
-   * filler unrelated to THIS task.
-   */
-  offTopicThreshold?: number;
   /** Extra completeness options forwarded to {@link checkCompleteness}. */
   completenessOptions?: CompletenessOptions;
-  /** Extra keyword-coverage options forwarded to {@link scoreKeywordCoverage}. */
-  keywordOptions?: KeywordCoverageScoringOptions;
-  /** Extra relevance options forwarded to {@link analyzeRelevance}. */
-  relevanceOptions?: RelevanceOptions;
   /**
    * Minimum number of distinct *concrete actionable artifacts* (file refs, line
    * numbers, code suggestions, actionable directives, structured findings) the
@@ -182,14 +129,14 @@ export interface EvaluateCiRunOptions {
    */
   previousOutput?: string;
   /**
-   * Similarity (0–1) at/above which the output is considered a repost of
+   * Similarity (0-1) at/above which the output is considered a repost of
    * `previousOutput`. Default: 0.9.
    */
   repostThreshold?: number;
   /**
    * Optional run timeline (start/end/events/timeout). When supplied, the
-   * staleness check folds in {@link analyzeStaleness} — timeout, large activity
-   * gaps, missing end event — the #1361 "check abandoned, timed out at the 2hr
+   * staleness check folds in {@link analyzeStaleness} - timeout, large activity
+   * gaps, missing end event - the #1361 "check abandoned, timed out at the 2hr
    * stale limit" mode. The timeline's `output` is filled from `output` if unset.
    */
   timeline?: RunTimeline;
@@ -215,18 +162,12 @@ export interface EvaluateCiRunOptions {
  * the raw analysis results for callers that want to drill in.
  */
 export interface CiRunEvaluation {
-  /** The CI-shaped evaluation — identical shape to the fleet adapter's output. */
+  /** The CI-shaped evaluation - identical shape to the fleet adapter's output. */
   evaluation: ActionEvaluation;
   /** Per-check results for this single run. */
   checks: CiCheckResult[];
   /** The Tier 1 completeness analysis. */
   completeness: CompletenessResult;
-  /** The Tier 2 keyword-coverage analysis. */
-  coverage: KeywordCoverageScore;
-  /** The Tier 2 topic-gap analysis (which important topics were missed). */
-  gaps: TopicGapResult;
-  /** The Tier 2 relevance analysis (precision: is the output *about* the prompt?). */
-  relevance: RelevanceResult;
   /** The Tier 1 staleness analysis (no-op: did it emit anything actionable?). */
   staleness: StalenessAnalysis;
 }
@@ -266,10 +207,6 @@ export interface StalenessAnalysis {
 // ─── CONSTANTS ──────────────────────────────────────────────────────────────────
 
 const DEFAULT_WORKER = 'ci-run';
-const DEFAULT_COVERAGE_THRESHOLD = 0.4;
-const DEFAULT_IGNORED_PROMPT_THRESHOLD = 0.15;
-const DEFAULT_RELEVANCE_THRESHOLD = 0.2;
-const DEFAULT_OFF_TOPIC_THRESHOLD = 0.08;
 const DEFAULT_MIN_ACTIONABLE_ARTIFACTS = 2;
 const DEFAULT_REPOST_THRESHOLD = 0.9;
 const DEFAULT_TRIVIAL_OUTPUT_CHARS = 80;
@@ -290,7 +227,7 @@ const ACKNOWLEDGEMENT_PATTERNS: ReadonlyArray<{ pattern: RegExp; label: string }
 ];
 
 /**
- * Patterns that count as **concrete actionable artifacts** — evidence a human
+ * Patterns that count as **concrete actionable artifacts** - evidence a human
  * can act on. Presence-counted, never quality-judged. Each distinct *kind* that
  * fires contributes at most once to the artifact count (so one long code block
  * doesn't outweigh a file ref + a line number + a directive). This is the
@@ -309,7 +246,7 @@ const ACTIONABLE_ARTIFACT_PATTERNS: ReadonlyArray<{ id: string; pattern: RegExp;
   // Explicit line references: "line 42", "L42", "lines 10-20", ":42:".
   {
     id: 'line-ref',
-    pattern: /\b(?:lines?|L)\s*\d+(?:\s*[-–]\s*\d+)?\b|:\d+(?::\d+)?\b/i,
+    pattern: /\b(?:lines?|L)\s*\d+(?:\s*[--]\s*\d+)?\b|:\d+(?::\d+)?\b/i,
     label: 'line number',
   },
   // A fenced code block (a concrete suggested snippet/patch).
@@ -327,9 +264,9 @@ const ACTIONABLE_ARTIFACT_PATTERNS: ReadonlyArray<{ id: string; pattern: RegExp;
   //   (a) a strong recommendation word that is essentially never a noun in
   //       review prose (should, must, consider, recommend, suggest, please,
   //       need(s) to, ought to, instead of, refactor, rename, extract, replace,
-  //       wrap in/with) — these signal "do X";
+  //       wrap in/with) - these signal "do X";
   //   (b) an imperative-form action verb at the START of a sentence or list item
-  //       ("Use INCR", "Add a guard", "Remove the cast") — anchored so polysemous
+  //       ("Use INCR", "Add a guard", "Remove the cast") - anchored so polysemous
   //       nouns mid-sentence ("the rate-limiting change", "the result set") do
   //       NOT match.
   {
@@ -399,135 +336,12 @@ function scoreCompleteness(result: CompletenessResult): CiCheckResult {
 }
 
 /**
- * Score the Tier 2 keyword-coverage check into a single-run result. The score is
- * the coverage score itself. Below `ignoredPromptThreshold` it is a hard `fail`
- * (the output essentially ignored the prompt); between that and
- * `coverageThreshold` it is a `warn` (partial); at/above it `pass`.
- */
-function scoreCoverage(
-  coverage: KeywordCoverageScore,
-  gaps: TopicGapResult,
-  coverageThreshold: number,
-  ignoredPromptThreshold: number,
-): CiCheckResult {
-  const score = round4(coverage.score);
-
-  let status: CiCheckStatus;
-  if (coverage.totalKeywords === 0) {
-    // No extractable topics in the prompt — nothing to measure; treat as pass.
-    status = 'pass';
-  } else if (score <= ignoredPromptThreshold) {
-    status = 'fail';
-  } else if (score < coverageThreshold) {
-    status = 'warn';
-  } else {
-    status = 'pass';
-  }
-
-  const missed = coverage.keywords.filter((k) => !k.covered).slice(0, 5).map((k) => k.term);
-  const summary =
-    coverage.totalKeywords === 0
-      ? 'no extractable topics in prompt'
-      : status === 'pass'
-        ? `covers ${(score * 100).toFixed(0)}% of prompt topics (${coverage.coveredCount}/${coverage.totalKeywords})`
-        : status === 'fail'
-          ? `ignored prompt: ${(score * 100).toFixed(0)}% coverage, missing ${missed.join(', ') || 'key topics'}`
-          : `partial: ${(score * 100).toFixed(0)}% coverage, missing ${missed.join(', ') || 'some topics'}`;
-
-  return {
-    check: 'keyword-coverage',
-    tier: 2,
-    score,
-    status,
-    summary,
-    detail: {
-      coverage: score,
-      covered: coverage.coveredCount,
-      total: coverage.totalKeywords,
-      gapSeverity: gaps.severity,
-      gaps: gaps.gapCount,
-    },
-  };
-}
-
-/**
- * Score the Tier 2 relevance check into a single-run result. This is the *dual*
- * of keyword coverage: coverage asks "did the output mention the prompt's
- * topics?" (recall), relevance asks "is the output *about* the prompt, or is it
- * generic filler?" (precision). The primary signal is TF-IDF cosine similarity
- * between prompt and output ({@link analyzeRelevance}); we also surface a
- * precision proxy — of the output's most distinctive terms, the fraction that
- * overlap the prompt rather than being off-topic "extra" terms — as supporting
- * evidence, plus the dominant off-topic terms themselves.
- *
- * At/under `offTopicThreshold` the output is essentially unrelated to the prompt
- * (hard `fail`); between that and `relevanceThreshold` it is a `warn` (drifting /
- * padded with generic advice); at/above it `pass`. An empty prompt or output is
- * unmeasurable and treated as a `pass` (completeness already catches the empty
- * output; an empty prompt is the caller's bug, not the agent's).
- */
-function scoreRelevance(
-  relevance: RelevanceResult,
-  relevanceThreshold: number,
-  offTopicThreshold: number,
-): CiCheckResult {
-  const score = round4(relevance.score);
-
-  // Precision proxy from term *counts* (not weights — shared/extra weights live
-  // on different scales in RelevanceResult, so a weight ratio is not comparable).
-  // Of the output's distinctive terms (shared-with-prompt + off-topic extras),
-  // what fraction overlap the prompt? Low = the output's vocabulary is off-topic.
-  const sharedCount = relevance.sharedTerms.length;
-  const extraCount = relevance.extraTerms.length;
-  const distinctive = sharedCount + extraCount;
-  const precision = distinctive > 0 ? round4(sharedCount / distinctive) : 0;
-
-  // Unmeasurable (empty prompt or output) -> nothing to judge here.
-  const measurable = sharedCount + relevance.missingTerms.length > 0;
-
-  let status: CiCheckStatus;
-  if (!measurable) {
-    status = 'pass';
-  } else if (score <= offTopicThreshold) {
-    status = 'fail';
-  } else if (score < relevanceThreshold) {
-    status = 'warn';
-  } else {
-    status = 'pass';
-  }
-
-  const offTopic = relevance.extraTerms.slice(0, 5).map((t) => t.term).filter(Boolean);
-  const summary = !measurable
-    ? 'not measurable (empty prompt or output)'
-    : status === 'pass'
-      ? `on-topic: ${(score * 100).toFixed(0)}% similarity to prompt`
-      : status === 'fail'
-        ? `off-topic: ${(score * 100).toFixed(0)}% similarity${offTopic.length ? `, dominated by ${offTopic.join(', ')}` : ''}`
-        : `drifting: ${(score * 100).toFixed(0)}% similarity${offTopic.length ? `, off-topic terms ${offTopic.join(', ')}` : ''}`;
-
-  return {
-    check: 'relevance',
-    tier: 2,
-    score,
-    status,
-    summary,
-    detail: {
-      similarity: score,
-      precision,
-      sharedTerms: sharedCount,
-      extraTerms: extraCount,
-      missingTerms: relevance.missingTerms.length,
-    },
-  };
-}
-
-/**
  * Scan an output for concrete actionable artifacts. Each artifact *kind* counts
  * at most once, so a single huge code block cannot masquerade as a thorough
  * review and one file ref + one directive + one finding beats one repeated
  * pattern. This is presence counting over artifacts, NOT a quality judgement:
  * the question is "is there anything here a human could act on?", never "is it
- * good?" — which keeps it Tier 1 (deterministic, forgery-resistant) rather than
+ * good?" - which keeps it Tier 1 (deterministic, forgery-resistant) rather than
  * model-as-judge.
  */
 export function analyzeActionability(output: string): ActionableArtifacts {
@@ -547,7 +361,7 @@ export function analyzeActionability(output: string): ActionableArtifacts {
  * Detect a bare-acknowledgement output: a short response that is (essentially)
  * only an approval / no-findings note, with no concrete artifacts. The length
  * guard keeps a long, substantive review that merely contains the words "looks
- * good" from being mislabeled — the acknowledgement must *be* the output, not
+ * good" from being mislabeled - the acknowledgement must *be* the output, not
  * appear in it.
  */
 function detectAcknowledgementOnly(
@@ -568,8 +382,8 @@ function detectAcknowledgementOnly(
 
 /**
  * Run the full Tier 1 staleness / no-op analysis for one CI run: the artifact
- * scan, the acknowledgement-only check, output-text abandonment, and — when the
- * caller supplied them — verbatim-repost detection against a prior output and
+ * scan, the acknowledgement-only check, output-text abandonment, and - when the
+ * caller supplied them - verbatim-repost detection against a prior output and
  * timeline-based timeout/abandonment.
  */
 export function analyzeCiStaleness(options: EvaluateCiRunOptions): StalenessAnalysis {
@@ -623,10 +437,10 @@ export function analyzeCiStaleness(options: EvaluateCiRunOptions): StalenessAnal
 
 /**
  * Score the Tier 1 staleness check into a single-run result. This is the no-op
- * detector: a run can pass completeness (non-empty, even substantive), coverage
- * (mentions the topics), and relevance (on-topic) and still be a **stale no-op**
- * — it emitted nothing actionable, reposted the prior comment, abandoned
- * mid-task, or timed out. Those are exactly the open-issue failures a crash
+ * detector: a run can pass completeness (non-empty, even substantive) and still
+ * be a **stale no-op** - it emitted nothing actionable, reposted the prior
+ * comment, abandoned mid-task, or timed out. Those are exactly the open-issue
+ * failures a crash
  * check cannot see.
  *
  * Verdict precedence (worst wins):
@@ -765,7 +579,7 @@ function toCheckScore(
 /**
  * Run the deterministic + heuristic single-run checks against one CI agent
  * output and return the per-check results plus the raw analyses. This is the
- * pure scoring core (no scorecard / gate yet) — useful when a caller wants the
+ * pure scoring core (no scorecard / gate yet) - useful when a caller wants the
  * signals without the Action projection.
  *
  * @param options - The prompt, the output, and thresholds.
@@ -775,52 +589,26 @@ export function scoreCiRun(
 ): {
   checks: CiCheckResult[];
   completeness: CompletenessResult;
-  coverage: KeywordCoverageScore;
-  gaps: TopicGapResult;
-  relevance: RelevanceResult;
   staleness: StalenessAnalysis;
 } {
-  const coverageThreshold = options.coverageThreshold ?? DEFAULT_COVERAGE_THRESHOLD;
-  const ignoredPromptThreshold = options.ignoredPromptThreshold ?? DEFAULT_IGNORED_PROMPT_THRESHOLD;
-  const relevanceThreshold = options.relevanceThreshold ?? DEFAULT_RELEVANCE_THRESHOLD;
-  const offTopicThreshold = options.offTopicThreshold ?? DEFAULT_OFF_TOPIC_THRESHOLD;
   const minActionableArtifacts = options.minActionableArtifacts ?? DEFAULT_MIN_ACTIONABLE_ARTIFACTS;
   const trivialOutputChars = options.trivialOutputChars ?? DEFAULT_TRIVIAL_OUTPUT_CHARS;
 
-  // Tier 1 — structural completeness of the agent's own output.
+  // Tier 1 - structural completeness of the agent's own output.
   const completeness = checkCompleteness(options.output, options.completenessOptions);
 
-  // Tier 2 — does the output cover the topics the prompt asked about? The prompt
-  // is the reference the agent never authored.
-  const keywordOpts: KeywordCoverageScoringOptions = {
-    minCoverage: coverageThreshold,
-    ...options.keywordOptions,
-  };
-  const coverage = scoreKeywordCoverage(options.prompt, options.output, keywordOpts);
-  const gaps = identifyTopicGaps(options.prompt, options.output, keywordOpts);
-
-  // Tier 2 — relevance is the dual of coverage: is the output *about* the prompt
-  // (precision), not just touching its keywords? Same prompt-as-reference logic.
-  const relevanceOpts: RelevanceOptions = {
-    threshold: relevanceThreshold,
-    ...options.relevanceOptions,
-  };
-  const relevance = analyzeRelevance(options.prompt, options.output, relevanceOpts);
-
-  // Tier 1 — staleness / no-op: did the run emit anything actionable, or is it a
+  // Tier 1 - staleness / no-op: did the run emit anything actionable, or is it a
   // stale no-op (nothing to act on, reposted prior comment, abandoned, timed
-  // out)? This is the failure the trio above cannot see — an output can be
-  // complete, cover the topics, and be on-topic, yet still say nothing useful.
+  // out)? This is the failure completeness cannot see - an output can be
+  // complete, even substantive, yet still say nothing actionable.
   const staleness = analyzeCiStaleness(options);
 
   const checks: CiCheckResult[] = [
     scoreCompleteness(completeness),
-    scoreCoverage(coverage, gaps, coverageThreshold, ignoredPromptThreshold),
-    scoreRelevance(relevance, relevanceThreshold, offTopicThreshold),
     scoreStaleness(staleness, options.output, minActionableArtifacts, trivialOutputChars),
   ];
 
-  return { checks, completeness, coverage, gaps, relevance, staleness };
+  return { checks, completeness, staleness };
 }
 
 /**
@@ -828,16 +616,16 @@ export function scoreCiRun(
  * same {@link ActionEvaluation} the fleet adapter produces (so it plugs straight
  * into `emitActionResult` / `toActionOutputs` / `renderActionSummary`).
  *
- * Four independent checks run, all Tier 1 / Tier 2 (no model-as-judge): structural
- * **completeness**, **keyword coverage** (recall), **relevance** (precision), and
- * **staleness** (no-op detection — did it emit anything actionable?).
+ * Two independent checks run, both Tier 1 (no model-as-judge): structural
+ * **completeness** and **staleness** (no-op detection - did it emit anything
+ * actionable?).
  *
  * The run is scored into one synthetic {@link TranscriptScore} and pushed through
  * the same `aggregateScorecard -> evaluateForAction` path the fleet uses: one run
  * becomes a one-worker scorecard, and the gate / outputs / summary all derive
  * from it. By default the worker grades on its single run's pass rate, so a run
  * with any failing check trips the gate (`gate: 'watch'` by default here, which
- * is stricter than the fleet default — a single CI run should be clean).
+ * is stricter than the fleet default - a single CI run should be clean).
  *
  * @param options - Prompt, output, worker name, thresholds, and gate options.
  */
@@ -848,7 +636,7 @@ export function evaluateCiRun(options: EvaluateCiRunOptions): CiRunEvaluation {
   const startedAtMs = now.getTime();
   const runId = startedAt.replace(/[:.]/g, '-');
 
-  const { checks, completeness, coverage, gaps, relevance, staleness } = scoreCiRun(options);
+  const { checks, completeness, staleness } = scoreCiRun(options);
 
   // Build the synthetic per-transcript score (the roll-up the scorecard expects).
   const checkScores = checks.map((c) =>
@@ -884,5 +672,5 @@ export function evaluateCiRun(options: EvaluateCiRunOptions): CiRunEvaluation {
   };
   const evaluation = evaluateForAction(scorecard, actionOptions);
 
-  return { evaluation, checks, completeness, coverage, gaps, relevance, staleness };
+  return { evaluation, checks, completeness, staleness };
 }

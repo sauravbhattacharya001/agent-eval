@@ -1,7 +1,7 @@
 # Integrating with `claude-code-action`
 
-This document maps the exact seam where `agent-eval`'s four CI checks
-(**completeness**, **keyword coverage**, **relevance**, **staleness**) hook into
+This document maps the exact seam where `agent-eval`'s two CI checks
+(**completeness**, **staleness**) hook into
 [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action),
 so a CI job can gate on *what the agent produced* before it goes green.
 
@@ -10,12 +10,11 @@ point is the unified `src/entrypoints/run.ts`, and the artifact the checks read
 is the execution file written by `base-action/src/execution-file.ts`.
 
 > **Thesis.** A `claude-code-action` run can finish with `conclusion: success`
-> (the CLI exited 0) and still be a failure *as a unit of work*: it posted a
-> guidance file verbatim instead of a review, name-dropped the prompt's keywords
-> in 80% generic filler, or said *"this looks reasonable, nice work"* with
+> (the CLI exited 0) and still be a failure *as a unit of work*: it posted an
+> empty or stub result, or said *"this looks reasonable, nice work"* with
 > nothing a human can act on. **Research-time safety (it ran without crashing)
-> is not runtime safety (it did the task).** These four checks are the runtime
-> layer, and they are deterministic — Tier 1 / Tier 2, no model-as-judge, no API
+> is not runtime safety (it did the task).** These two checks are the runtime
+> layer, and they are deterministic — Tier 1, no model-as-judge, no API
 > cost, no flake.
 
 ## Where the action produces the artifact we need
@@ -120,13 +119,11 @@ was empty (`'result' | 'assistant-text' | 'none'`); `details` carries the run's
 
 The execution file records the *conversation*, not the task framing — the action
 passes the prompt to the CLI via a prompt file (`${RUNNER_TEMP}/claude-prompts/
-claude-prompt.txt`), and `run.ts` logs it as `Context prompt: ...`. So the
-**coverage** and **relevance** checks (which both score the output *against the
-prompt*) need you to pass the same prompt the action was given. Supply it from
-the same expression you feed `claude-code-action`'s `prompt:` input (or read the
-prompt file). Without a prompt, those two checks have an empty reference and the
-gate leans on **completeness + staleness** only — still a meaningful no-op /
-empty-output guard, just not a relevance one.
+claude-prompt.txt`), and `run.ts` logs it as `Context prompt: ...`. `evaluateCiRun`
+still accepts the prompt (supply it from the same expression you feed
+`claude-code-action`'s `prompt:` input, or read the prompt file), but the gate
+itself leans on **completeness + staleness** — a meaningful no-op /
+empty-output guard that needs no prompt reference.
 
 ## Integration mode A — downstream workflow step (recommended)
 
@@ -207,17 +204,12 @@ the run already wrote.
 
 ## What each check catches here
 
-All four are independent and diverge in practice (see the README's single-run
+Both are independent and diverge in practice (see the README's single-run
 section for the full rationale and the knobs):
 
 - **Completeness** (Tier 1) — empty / stub / truncated / refusal output. A
   `result` turn with an empty `result` and no assistant text fails here. The
   bytes are the bytes; the agent can't forge "non-empty".
-- **Keyword coverage** (Tier 2, recall) — does the output cover the *prompt's*
-  topics? Catches the *"posted the guidance file verbatim instead of a review"*
-  mode. Needs the prompt (see caveat).
-- **Relevance** (Tier 2, precision) — is the output *about THIS* PR/issue, or
-  generic advice that name-drops the keywords? TF-IDF cosine vs. the prompt.
 - **Staleness** (Tier 1, no-op) — did the run emit anything **actionable**
   (file refs, line numbers, code suggestions, directives, structured findings)?
   An on-topic, substantive *"looks good to me"* with no artifacts fails here

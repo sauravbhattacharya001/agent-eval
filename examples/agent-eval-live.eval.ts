@@ -22,7 +22,6 @@ import {
   tier3,
   toBeValidJson,
   toBeNonEmpty,
-  toBeRelevantTo,
   toNotRepeat,
   toNotBeStale,
   toNotBeAbandoned,
@@ -93,7 +92,6 @@ const suite = defineEval({
       assertions: [
         // These work with the standard EvalProvider interface
         toBeNonEmpty(),
-        toBeRelevantTo({ task: 'security hardcoded secret hashing password vulnerability', threshold: 0.05 }),
       ],
     },
   ],
@@ -139,7 +137,6 @@ export function hashPassword(password: string): string {
     tier1(toHaveMeaningfulDiff(originalCode)),
 
     // Tier 2 — Heuristic (cheap, seconds)
-    tier2(toBeRelevantTo({ task: 'security hardcoded secret hashing password vulnerability', threshold: 0.05 })),
     tier2(toNotRepeat()),
     tier2(toNotBeStale(result.timeline)),
 

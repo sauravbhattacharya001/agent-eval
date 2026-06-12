@@ -173,7 +173,13 @@ export function extractSections(lines: readonly string[]): TranscriptSection[] {
   for (let i = 0; i < lines.length; i += 1) {
     const raw = lines[i] ?? '';
     const headingMatch = /^(#{2,6})\s+(.+?)\s*$/.exec(raw);
-    if (headingMatch) {
+    // Only level-2 (`##`) headings delimit top-level transcript sections. The
+    // canonical schema (Task / Actions Taken / Key Outputs / Outcome / …) is
+    // all `##`. Deeper headings (`###`+) are sub-structure WITHIN a section
+    // (e.g. `### Setup`, `### Task 1` under `## Actions Taken`) and must be
+    // folded into the enclosing section body — otherwise the section is cut
+    // off at the first subheading and its list items are lost (0 actions).
+    if (headingMatch && (headingMatch[1] ?? '').length === 2) {
       flush(i - 1);
       const hashes = headingMatch[1] ?? '';
       const heading = (headingMatch[2] ?? '').trim();
@@ -241,9 +247,18 @@ export function parseOutcome(body: string): OutcomeStatus {
     .find((l) => l.length > 0);
   if (!first) return 'unknown';
   const head = first.toLowerCase();
-  // Match leading word, allow punctuation/dashes after.
-  const tokenMatch = /^([a-z]+)\b/.exec(head);
-  const token = tokenMatch ? tokenMatch[1] : head;
+  // Strip leading markdown emphasis / decoration so a bold or emoji-prefixed
+  // outcome line still parses. Real transcripts write things like
+  // "**PASS** - ...", "__done__", "`pass`", or "\u2705 PASS" — without this the
+  // leading `**`/emoji defeats the token match and the whole run silently
+  // reads as `unknown`, which in turn defeats every outcome-aware check.
+  const cleaned = head.replace(/^[^a-z]+/i, '');
+  // Take the leading run of letters as the token. We deliberately do NOT use
+  // a trailing \b here: markdown like "__done__" has no word boundary before
+  // the underscore, so \b would fail to match. A greedy [a-z]+ stops at the
+  // first non-letter (space, dash, underscore, asterisk) which is exactly right.
+  const tokenMatch = /^([a-z]+)/.exec(cleaned);
+  const token = tokenMatch ? tokenMatch[1] : cleaned;
   if (token === 'pass' || token === 'passed' || token === 'success' || token === 'succeeded' || token === 'ok' || token === 'completed' || token === 'done')
     return 'pass';
   if (token === 'fail' || token === 'failed' || token === 'failure' || token === 'error' || token === 'errored' || token === 'crashed') return 'fail';

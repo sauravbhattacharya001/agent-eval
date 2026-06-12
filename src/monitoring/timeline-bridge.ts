@@ -33,6 +33,12 @@ export interface TimelineBridgeOptions {
   /**
    * Whether to emit a synthetic 'error' event when {@link Transcript.hadErrors}
    * is true. Default: true.
+   *
+   * Note: a synthetic error event is only emitted for runs that did NOT
+   * complete successfully. Errors documented under an `## Errors & Retries`
+   * section of a run that still reported `pass`/`success` are *recovered*
+   * errors, not live failures, and must not be surfaced as an error event
+   * (doing so false-flags healthy runs as stale). See {@link transcriptToTimeline}.
    */
   emitErrorEvent?: boolean;
 }
@@ -98,7 +104,12 @@ export function transcriptToTimeline(
     }
   }
 
-  if (emitErrorEvent && transcript.hadErrors && Number.isFinite(endMs)) {
+  // Emit a synthetic error event only when the run had errors AND did not
+  // complete successfully. Recovered errors (hadErrors=true but outcome=pass)
+  // are documented hiccups the run worked through, not live failures —
+  // surfacing them as an error event false-flags healthy runs as stale.
+  const completedOk = transcript.outcome === 'pass';
+  if (emitErrorEvent && transcript.hadErrors && !completedOk && Number.isFinite(endMs)) {
     events.push({
       timestamp: new Date(endMs - 1).toISOString(),
       type: 'error',

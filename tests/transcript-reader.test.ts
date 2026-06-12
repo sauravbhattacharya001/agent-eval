@@ -218,10 +218,36 @@ describe('extractSections', () => {
     expect(first.endLine).toBeGreaterThan(first.startLine);
   });
 
-  it('handles deeper headings (### and below)', () => {
+  it('folds deeper headings (### and below) into the enclosing ## section body', () => {
+    // Subheadings are sub-structure, not top-level sections. They (and the
+    // content beneath them) must remain part of the parent ## section so its
+    // list items are not lost. Regression for gardener transcripts that use
+    // ### Setup / ### Task 1 subheadings inside ## Actions Taken.
     const text = '# T\n## A\nbody\n### Sub\nmore body';
     const sections = extractSections(text.split('\n'));
-    expect(sections.map((s) => s.depth)).toEqual([2, 3]);
+    expect(sections.map((s) => s.depth)).toEqual([2]);
+    expect(sections[0]?.body).toContain('### Sub');
+    expect(sections[0]?.body).toContain('more body');
+  });
+
+  it('keeps list items that live under ### subheadings inside a ## section', () => {
+    const text = [
+      '## Actions Taken',
+      '',
+      '### Setup',
+      '1. Read the task spec',
+      '2. Cloned the repos',
+      '',
+      '### Task 1',
+      '3. Fixed the bug and pushed',
+    ].join('\n');
+    const sections = extractSections(text.split('\n'));
+    expect(sections).toHaveLength(1);
+    expect(extractListItems(sections[0]!.body)).toEqual([
+      'Read the task spec',
+      'Cloned the repos',
+      'Fixed the bug and pushed',
+    ]);
   });
 
   it('returns empty array for input with no ## headings', () => {
@@ -280,6 +306,16 @@ describe('parseOutcome', () => {
   it('detects partial', () => {
     expect(parseOutcome('partial - one repo skipped')).toBe('partial');
     expect(parseOutcome('incomplete')).toBe('partial');
+  });
+
+  it('strips leading markdown emphasis / emoji before matching (real transcript style)', () => {
+    // Workers write bold/decorated outcome lines; these must not read as unknown.
+    expect(parseOutcome('**PASS** - 2/2 tasks completed and pushed')).toBe('pass');
+    expect(parseOutcome('__done__')).toBe('pass');
+    expect(parseOutcome('`pass`')).toBe('pass');
+    expect(parseOutcome('\u2705 PASS - all good')).toBe('pass');
+    expect(parseOutcome('**FAIL** - sensor unavailable')).toBe('fail');
+    expect(parseOutcome('\u26a0\ufe0f partial - one repo skipped')).toBe('partial');
   });
 
   it('returns unknown for blank or weird input', () => {
@@ -560,17 +596,34 @@ describe('transcriptToTimeline', () => {
     expect(tl.events?.[tl.events.length - 1]?.type).toBe('end');
   });
 
-  it('emits an error event when transcript reports errors', () => {
+  it('does NOT emit an error event when a passed run only had recovered errors', () => {
+    // SENTINEL_TRANSCRIPT reports outcome=pass with a populated
+    // ## Errors & Retries section (recovered hiccups). Those are not live
+    // failures and must not surface as an error event, which would
+    // false-flag the run as stale. Regression for gardener-2026-06-09.
     const t = parseTranscript(SENTINEL_TRANSCRIPT, {
       filename: 'sentinel/2026-06-08-1815.md',
     });
+    expect(t.outcome).toBe('pass');
+    expect(t.hadErrors).toBe(true);
+    const tl = transcriptToTimeline(t);
+    expect(tl.events?.some((e) => e.type === 'error')).toBe(false);
+  });
+
+  it('emits an error event when a non-successful run reports errors', () => {
+    // FAILING_TRANSCRIPT reports outcome=fail with errors => the error is a
+    // genuine live failure and SHOULD be surfaced as an error event.
+    const t = parseTranscript(FAILING_TRANSCRIPT, {
+      filename: 'tempcheck/2026-06-07-1300.md',
+    });
+    expect(t.outcome).toBe('fail');
     const tl = transcriptToTimeline(t);
     expect(tl.events?.some((e) => e.type === 'error')).toBe(true);
   });
 
   it('skips error event when emitErrorEvent=false', () => {
-    const t = parseTranscript(SENTINEL_TRANSCRIPT, {
-      filename: 'sentinel/2026-06-08-1815.md',
+    const t = parseTranscript(FAILING_TRANSCRIPT, {
+      filename: 'tempcheck/2026-06-07-1300.md',
     });
     const tl = transcriptToTimeline(t, { emitErrorEvent: false });
     expect(tl.events?.some((e) => e.type === 'error')).toBe(false);

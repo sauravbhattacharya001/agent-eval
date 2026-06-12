@@ -220,7 +220,15 @@ function scoreStaleness(
   timeoutMs: number | undefined,
 ): { score: number; status: ScoreStatus; summary: string; detail: Record<string, number | string | boolean> } {
   const timeline = transcriptToTimeline(t, timeoutMs !== undefined ? { timeoutMs } : {});
-  const result = analyzeStaleness(timeline, {});
+  // The transcript format has no per-step timing, so the bridge distributes
+  // action events evenly across the run window. Those synthetic gaps are an
+  // artifact of even spacing, not real idle periods — so we disable gap-based
+  // staleness here (maxGapMs: Infinity). Every other signal stays active:
+  // timeout (real duration vs budget), missing-output, missing-end, and
+  // output-abandonment are all still meaningful on a summary transcript.
+  const result = analyzeStaleness(timeline, {
+    staleness: { maxGapMs: Number.POSITIVE_INFINITY },
+  });
 
   const errors = result.issues.filter((i) => i.severity === 'error').length;
   const warnings = result.issues.filter((i) => i.severity === 'warning').length;

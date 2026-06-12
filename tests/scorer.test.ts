@@ -99,6 +99,45 @@ pass
 12:00 PT -> 12:20 PT
 `;
 
+/**
+ * Regression fixture for the gardener-2026-06-09 false-positive: a run that
+ * COMPLETED successfully (outcome: pass, real pushed commits) but had a long
+ * wall-clock duration with few action items AND a populated `## Errors &
+ * Retries` section describing *recovered* (non-fatal) errors.
+ *
+ * Before the timeline-bridge/scorer fix this tripped staleness twice over:
+ *   1. evenly-distributed synthetic action timestamps across the long window
+ *      produced > 5-minute "gaps" => stale_gap warnings, and
+ *   2. hadErrors=true emitted a synthetic 'error' event => severity bump,
+ * stacking to isStale even though nothing actually went wrong.
+ * The run must now score staleness as a clean pass.
+ */
+const RECOVERED_ERRORS_TRANSCRIPT = `# Gardener Run - 2026-06-09 22:20 PT
+
+## Task
+Review open repositories, pick a maintenance task, implement it, and push.
+
+## Actions Taken
+1. Fixed a Python 3.10/3.11 compatibility bug in the ai repo and pushed it
+2. Added dartdoc documentation comments to the everything repo and pushed it
+
+## Key Outputs
+- Commit 24f8937: fix Python 3.10/3.11 compatibility in the ai repository
+- Commit 2f79325: add dartdoc documentation across the everything repository
+- Both changes built clean and were pushed to their default branches
+
+## Outcome
+pass - both maintenance tasks were implemented, verified, and pushed
+
+## Errors & Retries
+- git commit -m mis-parsed under PowerShell on the first attempt; re-ran with
+  the correct quoting and the commit succeeded
+- Compare-Object emitted a harmless UTF-8 artifact warning that was ignored
+
+## Duration
+22:20 PT -> 22:40 PT - approximately 20 minutes total
+`;
+
 function parse(text: string, filename: string, source?: string) {
   return parseTranscript(text, { filename, ...(source ? { source } : {}) });
 }
@@ -178,6 +217,27 @@ describe('scoreTranscript', () => {
       (c) => c.check === 'staleness',
     )!;
     expect(stale.status).toBe('fail');
+  });
+
+  it('does not false-flag a completed run with recovered errors as stale (gardener-2026-06-09 regression)', () => {
+    const t = parse(RECOVERED_ERRORS_TRANSCRIPT, '2026-06-09-2220.md');
+    // 20-minute run, generous gardener budget => only real signals apply.
+    const stale = scoreTranscript(t, { timeoutMs: 60 * 60_000 }).checks.find(
+      (c) => c.check === 'staleness',
+    )!;
+    expect(stale.status).toBe('pass');
+    expect(stale.score).toBe(1);
+    // The recovered errors documented in ## Errors & Retries must NOT be
+    // counted as a live error event for a run that reported pass.
+    expect(stale.detail.errors).toBe(0);
+  });
+
+  it('still fails staleness for a genuinely abandoned run (no deliverables)', () => {
+    // Guard the fix: a stub/abandoned run must STILL be caught. The empty
+    // transcript has no real output and a 'partial' (non-success) outcome.
+    const t = parse(EMPTY_TRANSCRIPT, '2026-06-08-0900.md');
+    const stale = scoreTranscript(t).checks.find((c) => c.check === 'staleness')!;
+    expect(stale.score).toBeLessThan(1);
   });
 
   it('fails completeness when deliverables are empty/stub', () => {

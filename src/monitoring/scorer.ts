@@ -510,7 +510,12 @@ function scoreRelevance(
 
   const result = analyzeRelevance(task, output, { threshold, ...options });
   const score = clamp01(result.score);
-  const status: ScoreStatus = result.relevant ? 'pass' : score >= threshold * 0.6 ? 'warn' : 'fail';
+  // Tier 2 is GRADING, not gating: it answers "how well does the output match
+  // the task?" on a 0-1 gradient. A low grade is real information (reported via
+  // the score), but it is never a `fail` - `fail` is reserved for Tier 1 gates
+  // (did the agent actually do the thing?). Capping at `warn` stops a grade
+  // from masquerading as a gate failure and inflating failCount/scorecards.
+  const status: ScoreStatus = result.relevant ? 'pass' : 'warn';
   const top = result.sharedTerms.slice(0, 3).map((s) => s.term).join(', ');
 
   return {
@@ -552,11 +557,9 @@ function scoreCoverage(
 
   const result = scoreKeywordCoverage(task, output, { minCoverage: threshold, ...options });
   const score = clamp01(result.score);
-  const status: ScoreStatus = result.passing
-    ? 'pass'
-    : score >= threshold * 0.6
-      ? 'warn'
-      : 'fail';
+  // Tier 2 grading: cap at `warn`. A low coverage score is reported on the
+  // gradient but never escalates to `fail` (see scoreRelevance for rationale).
+  const status: ScoreStatus = result.passing ? 'pass' : 'warn';
 
   return {
     score,

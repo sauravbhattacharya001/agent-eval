@@ -595,3 +595,69 @@ describe('scoreHistory', () => {
     expect(res.rows).toEqual([]);
   });
 });
+
+describe('Tier 2 is grading, not gating', () => {
+  // Principle (regression): Tier 1 checks GATE (did the agent do the thing? ->
+  // pass/fail). Tier 2 checks GRADE (how well does output match task? -> a 0-1
+  // score). A low grade must surface as a low score + at most `warn`, never
+  // `fail` - otherwise a grading signal contaminates failCount and the gate
+  // verdict. Found by scoring a real SWE-agent HumanEvalFix run whose prompt
+  // ("I have a function with a bug, can you help?") was contentless, yielding
+  // relevance=0.00 / coverage=0.00 that were wrongly escalated to `fail`.
+  const CONTENTLESS_PROMPT_RUN = `# SWE-agent HumanEvalFix python-0
+
+## Task
+I have a function that has a bug and needs to be fixed, can you help?
+
+## Actions Taken
+1. open solution.py
+2. edit 5:5
+3. python test.py
+4. submit
+
+## Key Outputs
+\`\`\`diff
+- if distance < threshold:
++ if abs(distance) < threshold:
+\`\`\`
+
+## Outcome
+pass - submitted a patch
+
+## Duration
+4 steps (wall-clock not recorded)
+`;
+
+  it('never emits `fail` from a Tier 2 check, even on a worst-case (0.00) grade', () => {
+    const t = parseTranscript(CONTENTLESS_PROMPT_RUN, { filename: 'swe-agent/hef-0.md' });
+    const s = scoreTranscript(t);
+    const tier2 = s.checks.filter((c) => c.tier === 2);
+    expect(tier2.length).toBeGreaterThan(0);
+    for (const c of tier2) {
+      expect(c.status).not.toBe('fail');
+    }
+  });
+
+  it('still reports the low grade on the score gradient (information is not lost)', () => {
+    const t = parseTranscript(CONTENTLESS_PROMPT_RUN, { filename: 'swe-agent/hef-0.md' });
+    const s = scoreTranscript(t);
+    const relevance = s.checks.find((c) => c.check === 'relevance');
+    const coverage = s.checks.find((c) => c.check === 'keyword-coverage');
+    // The grade is a real, low number - reported, not suppressed.
+    expect(relevance?.score).toBeLessThan(0.12);
+    expect(coverage?.score).toBeLessThan(0.4);
+    // ...but it surfaces as warn, not fail.
+    expect(relevance?.status).toBe('warn');
+    expect(coverage?.status).toBe('warn');
+  });
+
+  it('does not let a low Tier 2 grade inflate failCount (no gate contamination)', () => {
+    const t = parseTranscript(CONTENTLESS_PROMPT_RUN, { filename: 'swe-agent/hef-0.md' });
+    const s = scoreTranscript(t);
+    // No Tier 1 gate failed here, so the run must not be counted as a failure
+    // purely because the heuristic grade was low.
+    const tier1Fails = s.checks.filter((c) => c.tier === 1 && c.status === 'fail').length;
+    expect(tier1Fails).toBe(0);
+    expect(s.failCount).toBe(0);
+  });
+});

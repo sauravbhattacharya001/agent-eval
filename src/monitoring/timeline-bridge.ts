@@ -74,6 +74,12 @@ export function transcriptToTimeline(
       : Number.NaN;
 
   const events: RunEvent[] = [];
+  // Anchor for synthetic ordering when the transcript carries no parseable
+  // wall-clock. Staleness gap-detection is disabled for transcripts, so these
+  // timestamps only establish event ORDER and presence, never idle duration.
+  const anchorMs = Number.isFinite(startMs) ? startMs : 0;
+  const haveRealWindow = Number.isFinite(startMs) && Number.isFinite(endMs);
+
   if (Number.isFinite(startMs)) {
     events.push({
       timestamp: new Date(startMs).toISOString(),
@@ -82,19 +88,17 @@ export function transcriptToTimeline(
     });
   }
 
-  if (
-    expandActions &&
-    transcript.actionItems.length > 0 &&
-    Number.isFinite(startMs) &&
-    Number.isFinite(endMs)
-  ) {
-    const span = Math.max(0, endMs - startMs);
+  if (expandActions && transcript.actionItems.length > 0) {
     const n = transcript.actionItems.length;
-    // Distribute actions evenly across the (start, end) interval, exclusive
-    // of both endpoints so they do not collide with start/end events.
+    // With a real (start,end) window, distribute actions evenly across it
+    // (exclusive of endpoints). Without one, fall back to a synthetic 1s
+    // cadence from the anchor so a content-rich transcript still produces
+    // output events instead of being mistaken for an empty/no-op run.
+    const span = haveRealWindow ? Math.max(0, (endMs as number) - startMs) : 0;
     for (let i = 0; i < n; i += 1) {
-      const fraction = (i + 1) / (n + 1);
-      const ts = startMs + Math.round(span * fraction);
+      const ts = haveRealWindow
+        ? startMs + Math.round(span * ((i + 1) / (n + 1)))
+        : anchorMs + (i + 1) * 1000;
       const item = transcript.actionItems[i] ?? '';
       events.push({
         timestamp: new Date(ts).toISOString(),
@@ -109,9 +113,12 @@ export function transcriptToTimeline(
   // are documented hiccups the run worked through, not live failures —
   // surfacing them as an error event false-flags healthy runs as stale.
   const completedOk = transcript.outcome === 'pass';
-  if (emitErrorEvent && transcript.hadErrors && !completedOk && Number.isFinite(endMs)) {
+  if (emitErrorEvent && transcript.hadErrors && !completedOk) {
+    const errTs = Number.isFinite(endMs)
+      ? (endMs as number) - 1
+      : anchorMs + (transcript.actionItems.length + 1) * 1000 - 1;
     events.push({
-      timestamp: new Date(endMs - 1).toISOString(),
+      timestamp: new Date(errTs).toISOString(),
       type: 'error',
       content: truncate(transcript.errors, 280),
     });
@@ -119,7 +126,16 @@ export function transcriptToTimeline(
 
   if (Number.isFinite(endMs) && transcript.outcome !== 'unknown') {
     events.push({
-      timestamp: new Date(endMs).toISOString(),
+      timestamp: new Date(Number.isFinite(endMs) ? endMs : startMs + (transcript.actionItems.length + 1) * 1000).toISOString(),
+      type: 'end',
+      content: transcript.outcome,
+    });
+  } else if (!Number.isFinite(endMs) && transcript.outcome !== 'unknown' && Number.isFinite(startMs)) {
+    // No parseable end time, but the transcript states a finished outcome:
+    // emit a synthetic end event after the actions so 'no_end' is not flagged
+    // on a run that clearly finished. Ordering only; timing is inert here.
+    events.push({
+      timestamp: new Date(startMs + (transcript.actionItems.length + 1) * 1000).toISOString(),
       type: 'end',
       content: transcript.outcome,
     });

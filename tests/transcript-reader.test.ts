@@ -837,3 +837,82 @@ describe('rollingWindow', () => {
     expect(w.fromDate).toBe(w.toDate);
   });
 });
+
+describe('transcriptToTimeline: content-rich but timestamp-less runs', () => {
+  // Regression for the false-positive found scoring a real SWE-agent
+  // trajectory: a transcript with many actions and substantial output but NO
+  // parseable wall-clock must still produce output events, so staleness does
+  // not mistake a productive run for an empty/no-op one. (Idleness is
+  // undecidable without timing; absence-of-work is decidable from content.)
+  const ACTIONS_NO_CLOCK = `# SWE-agent Run - some-issue-123
+
+## Task
+Fix a rounding bug in the serializer.
+
+## Actions Taken
+1. ls -F
+2. open src/fields.py 1474
+3. edit 1475:1475
+4. python reproduce.py
+5. submit
+
+## Key Outputs
+\`\`\`diff
+- return int(value.total_seconds() / base_unit.total_seconds())
++ return int(round(value.total_seconds() / base_unit.total_seconds()))
+\`\`\`
+
+## Outcome
+pass - submitted a patch
+
+## Duration
+5 steps (wall-clock not recorded)
+`;
+
+  it('emits an output event per action item even without timestamps', () => {
+    const t = parseTranscript(ACTIONS_NO_CLOCK, { filename: 'swe-agent/some-issue-123.md' });
+    expect(Number.isFinite(t.identity.startedAtMs)).toBe(false);
+    const tl = transcriptToTimeline(t, {});
+    const outputs = tl.events.filter((e) => e.type === 'output');
+    expect(outputs).toHaveLength(5);
+  });
+
+  it('emits monotonically ordered timestamps for synthetic events', () => {
+    const t = parseTranscript(ACTIONS_NO_CLOCK, { filename: 'swe-agent/some-issue-123.md' });
+    const tl = transcriptToTimeline(t, {});
+    const times = tl.events.map((e) => Date.parse(e.timestamp));
+    expect(times.every((n) => Number.isFinite(n))).toBe(true); // no Invalid Date
+    const sorted = [...times].sort((a, b) => a - b);
+    expect(times).toEqual(sorted);
+  });
+
+  it('is NOT flagged stale by no_output when actions are present', () => {
+    const t = parseTranscript(ACTIONS_NO_CLOCK, { filename: 'swe-agent/some-issue-123.md' });
+    const tl = transcriptToTimeline(t, {});
+    const issues = detectStaleness(tl, { maxGapMs: Number.POSITIVE_INFINITY });
+    expect(issues.some((i) => i.kind === 'no_output')).toBe(false);
+  });
+
+  it('STILL flags a genuinely empty stub (no actions, no output)', () => {
+    const stub = `# Worker Run - 2026-06-11
+
+## Task
+Do the thing.
+
+## Actions Taken
+
+## Key Outputs
+
+## Outcome
+pass
+
+## Duration
+(not recorded)
+`;
+    const t = parseTranscript(stub, { filename: 'x/stub.md' });
+    const tl = transcriptToTimeline(t, {});
+    expect(tl.events.filter((e) => e.type === 'output')).toHaveLength(0);
+    const issues = detectStaleness(tl, { maxGapMs: Number.POSITIVE_INFINITY });
+    expect(issues.some((i) => i.kind === 'no_output')).toBe(true);
+  });
+});

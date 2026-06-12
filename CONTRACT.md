@@ -180,6 +180,36 @@ agent emit contract-compliant transcripts with no other tooling required.
 
 ---
 
+## CI gate (GitHub Actions)
+
+Gate a pipeline on transcript compliance. `agent-eval validate` exits non-zero
+when any transcript has an error-severity violation, so it fails the job
+naturally. Use `--finished` in CI so a run that died mid-flight (left an
+`IN-PROGRESS` stub) fails loudly instead of passing silently.
+
+```yaml
+# .github/workflows/transcripts.yml
+name: Validate agent transcripts
+on: [push, pull_request]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install -g agent-eval
+      # Fail the build on any non-compliant or unfinished transcript.
+      - run: agent-eval validate ./transcripts --finished
+```
+
+For machine-readable output (e.g. to annotate a PR), add `--json` and parse the
+result; the JSON includes per-file `errors[]`/`warnings[]` with stable `code`s.
+
+---
+
 ## Versioning
 
 This is `transcript-contract@v1`. The canonical machine definition lives in

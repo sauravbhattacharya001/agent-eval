@@ -635,6 +635,9 @@ See [`docs/claude-code-action-integration.md`](docs/claude-code-action-integrati
 for the exact seam (both an out-of-process downstream step and an in-process
 cleanup-phase block) and [`examples/cca-execution-eval.ts`](examples/cca-execution-eval.ts)
 for a runnable entry point.
+[`docs/eval-layer-proposal.md`](docs/eval-layer-proposal.md) writes up the case
+for this as an *optional* runtime eval layer — the reported failure modes it
+targets, why the gate is deterministic-only, and the minimal opt-in shape.
 
 ## License
 

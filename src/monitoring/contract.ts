@@ -117,8 +117,29 @@ export const TRANSCRIPT_CONTRACT_V1 = {
   ] satisfies ContractSection[],
 } as const;
 
-/** The in-progress sentinel a producer may use for a stub written at start. */
-const IN_PROGRESS_RE = /\bin[-\s]?progress\b/i;
+/**
+ * Decide whether an `## Outcome` body is the not-yet-finished IN-PROGRESS stub.
+ *
+ * We inspect ONLY the **leading token** of the first non-empty line — the same
+ * place {@link parseOutcome} reads the `pass`/`fail`/`partial` token from. A
+ * genuinely finished transcript may legitimately *mention* the phrase in its
+ * reason prose (e.g. `pass - dogfood: the known scrubme IN-PROGRESS stubs`); a
+ * substring test against the line (let alone the whole body) would mis-flag
+ * that as not-yet-finished. The sentinel only counts when it is what the line
+ * *leads with* — `IN-PROGRESS`, `IN-PROGRESS - will fill in later`, etc.
+ */
+function outcomeBodyIsInProgress(body: string): boolean {
+  const first = body
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .find((l) => l.length > 0);
+  if (!first) return false;
+  // Strip leading markdown emphasis / decoration (mirrors parseOutcome) so
+  // "**IN-PROGRESS**" / "`in progress`" still reads as the sentinel.
+  const cleaned = first.toLowerCase().replace(/^[^a-z]+/i, '');
+  // The sentinel must be what the line LEADS with, anchored at the start.
+  return /^in[-\s]?progress\b/.test(cleaned);
+}
 
 function makeResult(version: string, violations: ContractViolation[]): ContractValidationResult {
   const errors = violations.filter((v) => v.severity === 'error');
@@ -182,7 +203,7 @@ export function validateParsedTranscript(
   //    unless it's an allowed IN-PROGRESS stub.
   const outcomeSection = t.bySlug['outcome'];
   if (outcomeSection) {
-    const isInProgress = IN_PROGRESS_RE.test(outcomeSection.body);
+    const isInProgress = outcomeBodyIsInProgress(outcomeSection.body);
     if (isInProgress) {
       if (!allowInProgress) {
         violations.push({

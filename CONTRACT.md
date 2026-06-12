@@ -117,7 +117,10 @@ The single most valuable transcript is the one written by a run that later
 `IN-PROGRESS` is accepted by default (it's a valid not-yet-finished stub). When
 you validate **finished** runs (e.g. in CI after the run completes), pass
 `--finished` and any transcript still stuck at `IN-PROGRESS` becomes an error —
-that's how you detect runs that died mid-flight.
+that's how you detect runs that died mid-flight. As with `pass`/`fail`/`partial`,
+only the **leading token** of the `## Outcome` line decides this: a finished run
+that merely *mentions* the phrase in its reason prose (e.g.
+`pass - dogfood found the known IN-PROGRESS stubs`) is still `pass`, not a stub.
 
 ---
 

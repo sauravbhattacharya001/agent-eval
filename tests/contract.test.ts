@@ -144,6 +144,53 @@ IN-PROGRESS
       expect(res.valid).toBe(false);
       expect(res.errors.some((e) => e.code === 'outcome-in-progress')).toBe(true);
     });
+
+    it('does NOT flag a finished transcript that merely mentions "IN-PROGRESS" in its outcome prose', () => {
+      // Regression: the in-progress check used to test the whole Outcome body,
+      // so a genuinely finished run whose reason text referenced the phrase
+      // (e.g. a dogfood note about other workers' IN-PROGRESS stubs) was
+      // mis-flagged as not-yet-finished. The token lives on the FIRST line; the
+      // rest is free-text justification and must not flip the verdict.
+      const FINISHED_MENTIONS = `# Eval Run - 2026-06-12 00:00 PT
+
+## Task
+Ship a piece of the eval framework.
+
+## Actions Taken
+1. Implemented the change and added tests
+2. Ran the dogfood validation over the fleet transcripts
+
+## Key Outputs
+- Commit d5e0c71: staged the proposal
+
+## Outcome
+pass - shipped; dogfood found the only failures were the known scrubme IN-PROGRESS stubs
+
+## Errors & Retries
+- None.
+
+## Duration
+00:00 PT -> 00:08 PT (~8 minutes)
+`;
+      // Even under the strict --finished gate it must be accepted as finished.
+      const res = validateTranscript(FINISHED_MENTIONS, { allowInProgress: false });
+      expect(res.errors.some((e) => e.code === 'outcome-in-progress')).toBe(false);
+      expect(res.valid).toBe(true);
+      // And the outcome must resolve to `pass`, not `unknown`.
+      const parsed = parseTranscript(FINISHED_MENTIONS);
+      expect(parsed.outcome).toBe('pass');
+    });
+
+    it('still flags a real stub whose Outcome line leads with the sentinel even with trailing prose', () => {
+      // The leading token on the first line is what counts: "IN-PROGRESS (...)"
+      // is still a stub, regardless of any trailing note on that same line.
+      const LEADING_STUB = STUB.replace(
+        '## Outcome\nIN-PROGRESS',
+        '## Outcome\nIN-PROGRESS - started, will fill in at the end',
+      );
+      const res = validateTranscript(LEADING_STUB, { allowInProgress: false });
+      expect(res.errors.some((e) => e.code === 'outcome-in-progress')).toBe(true);
+    });
   });
 
   describe('warning-severity violations', () => {

@@ -1,0 +1,39 @@
+[
+  {
+    "type": "system",
+    "subtype": "init",
+    "session_id": "demo-abandoned",
+    "tools": ["Read", "Grep", "Bash"]
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "role": "assistant",
+      "content": [
+        { "type": "text", "text": "I'll start by reading the changed files to review the rate-limiting logic." },
+        { "type": "tool_use", "id": "tu_1", "name": "Read", "input": { "file_path": "src/auth/limiter.ts" } }
+      ],
+      "usage": { "input_tokens": 1100, "output_tokens": 40 }
+    }
+  },
+  {
+    "type": "user",
+    "message": {
+      "role": "user",
+      "content": [
+        { "type": "tool_result", "tool_use_id": "tu_1", "content": "export function refill(bucket, now) { /* ... */ }" }
+      ]
+    }
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "role": "assistant",
+      "content": [
+        { "type": "text", "text": "Let me also grep for the Redis usage so I can comment on the cache key expiry next." },
+        { "type": "tool_use", "id": "tu_2", "name": "Grep", "input": { "pattern": "redis", "path": "src/auth" } }
+      ],
+      "usage": { "input_tokens": 1700, "output_tokens": 44 }
+    }
+  }
+]

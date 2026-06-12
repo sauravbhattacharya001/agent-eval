@@ -160,7 +160,16 @@ These are the things to settle *with maintainers*, not unilaterally:
    relevance need the prompt as a reference. Mode A asks the user to pass it;
    Mode B can read `context.inputs.prompt`. Confirm the cleanest source.
 2. **Default thresholds.** What `gate` level (`watch` / `at-risk`) is the right
-   default for an *opt-in* check so it's useful without being noisy?
+   default for an *opt-in* check so it's useful without being noisy? The current
+   defaults have been validated against realistic execution-file fixtures for the
+   four cited failure modes — see [Threshold validation](#appendix-threshold-validation-against-realistic-runs)
+   below. They cleanly separate a healthy review (pass) from the three failure
+   modes (fail) with no false positive. The one calibration nuance worth raising:
+   the **relevance** default (0.2 TF-IDF cosine) lands a genuinely-good but
+   code-heavy review at `warn` rather than a clean pass, because the review's
+   distinctive tokens are identifiers the prose prompt never uses. `warn` keeps
+   the worker at `watch` and does *not* trip the gate, so this is safe — but it's
+   the threshold most worth a maintainer's eye.
 3. **Failure semantics.** Should a tripped gate `setFailed` the action, or only
    set `eval_passed=false` and let the workflow decide? (Lean: outputs only by
    default; let the workflow `if:` on `eval_passed`.)
@@ -181,12 +190,54 @@ Everything the integration needs exists and is tested in this repo today:
   summary / exit code (`emitActionResult`, `renderActionSummary`).
 - **`examples/cca-execution-eval.ts`** — a runnable Mode-A entry point, smoke-tested
   end-to-end.
+- **`tests/threshold-validation.test.ts` + `tests/fixtures/cca-runs/*.json`** —
+  the default thresholds run against realistic execution-file fixtures for the
+  four cited failure modes plus a healthy run (the appendix above).
 - **[`docs/claude-code-action-integration.md`](./claude-code-action-integration.md)**
   — the line-level seam against `run.ts` and the execution-file shape.
 
-The remaining work is engagement, not engineering: validate the threshold
-defaults against real runs, then bring the proposal (starting with Mode A) to
-the maintainers.
+The remaining work is engagement, not engineering: the threshold defaults are
+now validated against realistic runs (appendix below); the next step is to bring
+the proposal (starting with Mode A) to the maintainers.
+
+## Appendix: threshold validation against realistic runs
+
+Open question #2 (default thresholds) is backed by a reproducible test rather
+than an assertion. `tests/threshold-validation.test.ts` drives the **full
+Mode-A pipeline** — `extractCcaRunFromFile(<execution file>) -> evaluateCiRun()`
+— over `claude-code-action`-shaped execution-file fixtures
+(`tests/fixtures/cca-runs/*.json`, the real `CcaTurn[]` array). **Only the
+`watch` gate is set; every threshold is a documented default.** The fixtures are
+the four failure modes this proposal cites plus a healthy run that must not be
+flagged.
+
+The result (verdicts + the per-check breakdown the gate produced):
+
+| Fixture | CLI result | Gate | Tripped by (default thresholds) |
+|---------|-----------|------|---------------------------------|
+| `healthy-review` | `success` | ✅ **pass** | — (completeness ✓, coverage ✓ 48%, relevance ⚠ 18%, staleness ✓ 5 artifact kinds) |
+| `verbatim-claudemd` (#1302) | `success` | ❌ **fail** | **coverage** (0%, hard fail — ignored the prompt) + **relevance** (1%, off-topic) |
+| `stale-noop` | `success` | ❌ **fail** | **staleness** (bare-acknowledgement no-op, 0 artifacts) — completeness ✓ alone would have passed it |
+| `abandoned-no-result` (#1361) | *(no result turn)* | ❌ **fail** | **staleness** (no terminal `result` turn; mid-task narration, 0 actionable artifacts) |
+
+What this demonstrates concretely:
+
+- **No false positive.** The healthy review is the *only* fixture that passes,
+  and it emits an empty `eval_evidence`.
+- **The `success`-but-failed cases are caught.** Three of the four ran
+  `conclusion: success` (CLI exit 0) — the crash-only signal would pass all of
+  them green. The gate fails them with a specific `eval_evidence` line.
+- **Each failure is a Tier 1/Tier 2 check, no model-as-judge.** `#1302` is a
+  coverage+relevance fail; the no-op and the abandoned run are staleness fails.
+  The deterministic band covers every reported mode.
+- **`completeness` is necessary but not sufficient.** The stale `"LGTM"` run is
+  structurally complete (grammatical, non-empty) and still fails — exactly why
+  the gate is four checks, not one.
+
+The honest calibration finding (relevance `warn` on a code-heavy review against a
+prose prompt) is pinned in the test as well, so a future change to the default
+cannot silently turn that `warn` into a hard `fail` on a good review without
+tripping CI. That is the evidence open question #2 should be decided on.
 
 ## See also
 

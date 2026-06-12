@@ -57,6 +57,7 @@ export type {
   CheckScore,
   TranscriptScore,
   ScoreTranscriptOptions,
+  RunMetadata,
   CheckName,
   ScoreTier,
   ScoreStatus,

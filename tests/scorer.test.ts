@@ -172,6 +172,7 @@ describe('scoreTranscript', () => {
       'keyword-coverage',
       'relevance',
       'staleness',
+      'verification',
     ]);
     for (const c of result.checks) {
       expect(c.worker).toBe('sentinel');
@@ -324,7 +325,7 @@ describe('scoreTranscripts + toScoreRows', () => {
     const a = parse(GOOD_TRANSCRIPT, '2026-06-08-1815.md');
     const b = parse(NO_TASK_TRANSCRIPT, '2026-06-09-1200.md');
     const rows = toScoreRows(scoreTranscripts([a, b]));
-    expect(rows.length).toBe(8); // 4 checks x 2 transcripts
+    expect(rows.length).toBe(10); // 5 checks x 2 transcripts
     expect(rows[0]?.check).toBe('staleness');
   });
 });
@@ -521,10 +522,10 @@ describe('scoreHistory', () => {
     const res = scoreHistory(root);
     expect(res.discovered).toBeGreaterThanOrEqual(3);
     expect(res.scored).toBeGreaterThanOrEqual(3);
-    expect(res.rows.length).toBe(res.scored * 4);
+    expect(res.rows.length).toBe(res.scored * 5);
     // files written
     const sentinelScores = readScores(scoresPathFor(root, 'sentinel'));
-    expect(sentinelScores.length).toBe(8); // 2 runs x 4 checks
+    expect(sentinelScores.length).toBe(10); // 2 runs x 5 checks
     const gardenerScores = readScores(scoresPathFor(root, 'gardener'));
     expect(gardenerScores.length).toBeGreaterThanOrEqual(4);
   });
@@ -533,7 +534,7 @@ describe('scoreHistory', () => {
     scoreHistory(root);
     scoreHistory(root);
     const sentinelScores = readScores(scoresPathFor(root, 'sentinel'));
-    expect(sentinelScores.length).toBe(8); // still 8, not 16/24
+    expect(sentinelScores.length).toBe(10); // still 10, not 20/30
   });
 
   it('does not write when persist is false', () => {

@@ -11,6 +11,7 @@ Think: **Jest/Vitest but for agent outputs** instead of functions.
 - ⚖️ **LLM-as-judge** — structured rubrics, calibration, consensus judging, adversarial probes
 - 🔍 **Hallucination detection** — flag fabricated facts, broken links, invented references
 - 📐 **Drift monitoring** — catch when an agent sidetracks from its assigned task
+- 🛰️ **Ground-truth verification** — cross-check a transcript's self-reported outcome/duration against trusted orchestrator metadata; catch a run that *claims* it passed but actually errored
 - 🔁 **Repetition/loop detection** — catch stuck agents and saturated output
 - 🚦 **CI quality gate** — gate a GitHub Action on agent output quality (deterministic, offline)
 - ✅ **Clear pass/fail** — results with evidence for what went wrong
@@ -486,6 +487,40 @@ evaluate (`noData: 'pass' | 'fail' | 'ignore'`).
 See [`examples/ci-eval.ts`](examples/ci-eval.ts) for a runnable CI entry point
 and [`examples/github-action-eval.yml`](examples/github-action-eval.yml) for a
 full workflow that gates a PR on agent output quality.
+
+#### Verifying claims against ground truth
+
+Every check above reads the *transcript* — so none can catch a transcript that
+is simply wrong about its own run (the `pass` an agent wrote over a run that
+actually crashed). When you have a **trusted** record of the run from the
+orchestrator (cron/process status, measured wall-clock), pass it as
+`runMetadata` and the scorer adds a Tier-1 `verification` check that grades the
+self-report against it:
+
+```typescript
+import { scoreTranscript } from 'agent-eval';
+
+const score = scoreTranscript(transcript, {
+  runMetadata: { exitStatus: 'error', durationMs: 5_520_000 },
+});
+// verification → fail: "claims pass but orchestrator recorded error"
+//                      + self-reported duration disagrees with measured
+```
+
+It flags three unfakeable mismatches: a finished outcome that contradicts the
+trusted exit status (hard fail), a transcript that reports done while the run is
+still running (warn), and a self-reported duration that disagrees with the
+measured wall-clock (warn). With no `runMetadata` the check **skips** — zero
+behavior change. [AgentLens](../../agentlens) emits this metadata directly via
+`export_run_metadata()`, making the capture → transcript → eval path
+self-verifying end to end.
+
+| `RunMetadata` field | Meaning |
+|------|---------|
+| `exitStatus` | Trusted run status: `ok` \| `error` \| `timeout` \| `killed` \| `running` |
+| `exitCode` | Process exit code when known (`0` == success) |
+| `startedAt` / `endedAt` | Trusted wall-clock (ISO-8601 or epoch ms); absent `endedAt` ⇒ still running |
+| `durationMs` | Trusted measured duration; else derived from start/end |
 
 ### Evaluating a single run (one PR / one issue)
 

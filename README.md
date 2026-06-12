@@ -565,6 +565,22 @@ See [`examples/ci-single-run.ts`](examples/ci-single-run.ts) for a runnable
 example (good review passes; boilerplate-posted-verbatim and generic-advice
 outputs fail on coverage/relevance; an on-topic no-op fails on staleness alone).
 
+### Wiring it to `claude-code-action`
+
+Those same four checks plug directly into
+[`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action):
+its run writes a JSON execution log (the `execution_file` output) that already
+contains the agent's final output and run timeline.
+[`extractCcaRunFromFile`](src/action/cca-execution.ts) projects that file into
+the `{ prompt, output, timeline }` `evaluateCiRun` expects, so a downstream CI
+step can gate the job on *what the agent produced* — completeness, coverage,
+relevance, and no-op detection — with no model-as-judge and no extra API cost.
+
+See [`docs/claude-code-action-integration.md`](docs/claude-code-action-integration.md)
+for the exact seam (both an out-of-process downstream step and an in-process
+cleanup-phase block) and [`examples/cca-execution-eval.ts`](examples/cca-execution-eval.ts)
+for a runnable entry point.
+
 ## License
 
 MIT

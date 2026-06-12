@@ -67,3 +67,19 @@ export type {
   ActionableArtifacts,
   StalenessAnalysis,
 } from './ci-run.js';
+
+export {
+  parseCcaExecutionLog,
+  extractCcaRun,
+  extractCcaRunFromFile,
+} from './cca-execution.js';
+
+export type {
+  CcaContentItem,
+  CcaMessage,
+  CcaTurn,
+  CcaExecutionLog,
+  CcaResultDetails,
+  CcaRunExtract,
+  ExtractCcaRunOptions,
+} from './cca-execution.js';

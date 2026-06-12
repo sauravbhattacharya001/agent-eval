@@ -509,6 +509,9 @@ export {
   evaluateCiRun,
   analyzeActionability,
   analyzeCiStaleness,
+  parseCcaExecutionLog,
+  extractCcaRun,
+  extractCcaRunFromFile,
 } from './action/index.js';
 export type {
   GateGrade,
@@ -528,4 +531,11 @@ export type {
   CiRunEvaluation,
   ActionableArtifacts,
   StalenessAnalysis,
+  CcaContentItem,
+  CcaMessage,
+  CcaTurn,
+  CcaExecutionLog,
+  CcaResultDetails,
+  CcaRunExtract,
+  ExtractCcaRunOptions,
 } from './action/index.js';

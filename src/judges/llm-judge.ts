@@ -59,7 +59,7 @@ export class LLMJudgeBackend implements JudgeBackend {
 
   constructor(config: LLMJudgeConfig) {
     this.config = config;
-    this.url = ENDPOINTS[config.type] ?? ENDPOINTS.openai!;
+    this.url = ENDPOINTS[config.type] ?? ENDPOINTS.openai ?? '';
     this.model = config.model ?? DEFAULT_MODELS[config.type] ?? 'llama-3.3-70b-versatile';
     this.name = `llm-judge/${this.model}`;
   }

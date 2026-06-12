@@ -392,8 +392,8 @@ function inferIdentity(
   }
   if (!worker && title) {
     const titleMatch = /^([A-Za-z][A-Za-z0-9_\- ]*?)\s+Run\b/i.exec(title);
-    if (titleMatch) {
-      worker = titleMatch[1]!.toLowerCase().replace(/\s+/g, '-');
+    if (titleMatch && titleMatch[1]) {
+      worker = titleMatch[1].toLowerCase().replace(/\s+/g, '-');
     }
   }
   if (!worker) worker = 'unknown';
@@ -455,7 +455,7 @@ function parentDirectoryName(p: string): string {
   const norm = p.replace(/\\/g, '/');
   const segments = norm.split('/').filter((s) => s.length > 0);
   if (segments.length < 2) return '';
-  return segments[segments.length - 2]!.toLowerCase();
+  return (segments[segments.length - 2] ?? '').toLowerCase();
 }
 
 /**

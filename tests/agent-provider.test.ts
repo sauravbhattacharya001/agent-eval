@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AgentProvider, defineTool, agentContext } from '../src/providers/agent.js';
-import type { AgentRunResult } from '../src/providers/agent.js';
 
 // ─── MOCK FETCH ─────────────────────────────────────────────────────────────────
 

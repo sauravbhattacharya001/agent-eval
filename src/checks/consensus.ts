@@ -147,8 +147,10 @@ export async function runConsensus(
     if (scores.length === 0) continue;
 
     scores.sort((a, b) => a - b);
-    const median = scores[Math.floor(scores.length / 2)]!;
-    const range = scores[scores.length - 1]! - scores[0]!;
+    const median = scores[Math.floor(scores.length / 2)] ?? 0;
+    const first = scores[0] ?? 0;
+    const last = scores[scores.length - 1] ?? 0;
+    const range = last - first;
     const disagreed = range > maxDisagreement;
 
     if (disagreed) disagreements.push(criterion.id);
@@ -201,7 +203,8 @@ function computeMedianResponse(
 
     // Sort by score, take median
     allScores.sort((a, b) => a.score - b.score);
-    const medianEntry = allScores[Math.floor(allScores.length / 2)]!;
+    const medianEntry = allScores[Math.floor(allScores.length / 2)];
+    if (!medianEntry) continue;
 
     medianScores.push({
       criterionId: criterion.id,
@@ -213,12 +216,12 @@ function computeMedianResponse(
   }
 
   // Use summary/suggestions from the response closest to the median
-  const lastResponse = responses[responses.length - 1]!;
+  const lastResponse = responses[responses.length - 1];
 
   return {
     scores: medianScores,
-    summary: lastResponse.summary,
-    suggestions: lastResponse.suggestions,
+    summary: lastResponse?.summary ?? '',
+    suggestions: lastResponse?.suggestions ?? [],
   };
 }
 

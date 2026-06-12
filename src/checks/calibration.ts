@@ -218,13 +218,15 @@ export async function calibrate(
 
     // Check verdict accuracy
     if (example.expectedVerdict && sampleResults.length > 0) {
-      const lastResponse = sampleResults[sampleResults.length - 1]!;
-      const verdict = computeVerdict(lastResponse, rubric);
-      if ((verdict.verdict === 'pass' || verdict.verdict === 'fail') &&
-          verdict.verdict === example.expectedVerdict) {
-        verdictMatches++;
+      const lastResponse = sampleResults[sampleResults.length - 1];
+      if (lastResponse) {
+        const verdict = computeVerdict(lastResponse, rubric);
+        if ((verdict.verdict === 'pass' || verdict.verdict === 'fail') &&
+            verdict.verdict === example.expectedVerdict) {
+          verdictMatches++;
+        }
+        verdictTotal++;
       }
-      verdictTotal++;
     }
   }
 
@@ -317,8 +319,8 @@ function computeMedianScores(
 
     if (scores.length > 0) {
       scores.sort((a, b) => a - b);
-      const median = scores[Math.floor(scores.length / 2)]!;
-      result.set(criterion.id, median);
+      const median = scores[Math.floor(scores.length / 2)];
+      if (median !== undefined) result.set(criterion.id, median);
     }
   }
 

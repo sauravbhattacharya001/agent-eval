@@ -233,7 +233,8 @@ interface ChatCompletionResponse {
  */
 export class AgentProvider implements EvalProvider {
   readonly name: string;
-  private config: AgentProviderConfig;
+  private config: AgentProviderConfig &
+    Required<Pick<AgentProviderConfig, 'maxIterations' | 'maxDurationMs' | 'includeToolResults'>>;
   private toolMap: Map<string, ToolDefinition>;
 
   /** Last run result — accessible after generate() for timeline inspection. */
@@ -278,8 +279,8 @@ export class AgentProvider implements EvalProvider {
    */
   async run(prompt: string, options?: ProviderOptions): Promise<AgentRunResult> {
     const startTime = Date.now();
-    const maxIterations = this.config.maxIterations!;
-    const maxDurationMs = this.config.maxDurationMs!;
+    const maxIterations = this.config.maxIterations;
+    const maxDurationMs = this.config.maxDurationMs;
 
     const messages: ChatMessage[] = [];
     const turns: AgentTurn[] = [];
@@ -336,7 +337,17 @@ export class AgentProvider implements EvalProvider {
         break;
       }
 
-      const choice = response.choices[0]!;
+      const choice = response.choices[0];
+      if (!choice) {
+        stopReason = 'error';
+        error = 'LLM response contained no choices';
+        events.push({
+          type: 'error',
+          timestamp: new Date().toISOString(),
+          content: error,
+        });
+        break;
+      }
       const usage = response.usage;
 
       if (usage) {
@@ -753,19 +764,25 @@ export class AgentProvider implements EvalProvider {
       };
 
       // Map Gemini response to OpenAI-compatible format
-      const candidate = data.candidates[0]!;
+      const candidate = data.candidates[0];
+      if (!candidate) {
+        throw new Error('Gemini response contained no candidates');
+      }
       const parts = candidate.content.parts;
 
       const textParts = parts.filter(p => p.text).map(p => p.text).join('');
-      const functionCalls = parts.filter(p => p.functionCall);
+      const functionCalls = parts.filter(
+        (p): p is { functionCall: { name: string; args: Record<string, unknown> } } =>
+          p.functionCall !== undefined,
+      );
 
       const toolCalls = functionCalls.length > 0
         ? functionCalls.map((p, i) => ({
             id: `call_gemini_${Date.now()}_${i}`,
             type: 'function' as const,
             function: {
-              name: p.functionCall!.name,
-              arguments: JSON.stringify(p.functionCall!.args),
+              name: p.functionCall.name,
+              arguments: JSON.stringify(p.functionCall.args),
             },
           }))
         : undefined;
@@ -809,8 +826,8 @@ export class AgentProvider implements EvalProvider {
     }
 
     // Default: return only the last assistant message (the final answer)
-    const lastTurn = turns[turns.length - 1]!;
-    return lastTurn.content;
+    const lastTurn = turns[turns.length - 1];
+    return lastTurn ? lastTurn.content : '';
   }
 }
 

@@ -17,15 +17,25 @@ import {
   toHaveNoConfidenceFlags,
   toNotBeOverridden,
 } from '../src/checks/confidence.js';
-import type {
-  ConfidenceLabelingOptions,
-  ConfidenceSignal,
-  ConfidenceAssessment,
-  LabeledVerdict,
-} from '../src/checks/confidence.js';
-import type { JudgeResult, CriterionScore } from '../src/checks/judge.js';
+import type { JudgeResult, CriterionScore, JudgeBackend, RawJudgeResponse } from '../src/checks/judge.js';
 
 // ─── Test Helpers ───────────────────────────────────────────────────────────────
+
+/**
+ * Minimal typed JudgeBackend stub. These tests only exercise judge metadata
+ * (rubric/options/assertion-factory names), never the evaluate() path, so the
+ * stub returns an empty-but-valid RawJudgeResponse rather than being cast to any.
+ */
+function makeMockBackend(): JudgeBackend {
+  return {
+    name: 'mock-backend',
+    evaluate: async (): Promise<RawJudgeResponse> => ({
+      scores: [],
+      summary: '',
+      suggestions: [],
+    }),
+  };
+}
 
 function makeJudgeResult(overrides: Partial<JudgeResult> = {}): JudgeResult {
   return {
@@ -500,7 +510,7 @@ describe('labelVerdict', () => {
 
 describe('ConfidenceAwareJudge', () => {
   it('exposes rubric and options', () => {
-    const mockBackend = { generate: async () => '{}' } as any;
+    const mockBackend = makeMockBackend();
     const rubric = {
       name: 'test',
       description: 'test rubric',
@@ -518,7 +528,7 @@ describe('ConfidenceAwareJudge', () => {
 
 describe('assertion factories', () => {
   it('toPassWithConfidence creates assertion with correct name', () => {
-    const mockBackend = { generate: async () => '{}' } as any;
+    const mockBackend = makeMockBackend();
     const rubric = {
       name: 'Quality Check',
       description: 'test',
@@ -529,7 +539,7 @@ describe('assertion factories', () => {
   });
 
   it('toHaveAdequateConfidence creates assertion with threshold in name', () => {
-    const mockBackend = { generate: async () => '{}' } as any;
+    const mockBackend = makeMockBackend();
     const rubric = {
       name: 'test',
       description: 'test',
@@ -540,7 +550,7 @@ describe('assertion factories', () => {
   });
 
   it('toHaveNoConfidenceFlags creates assertion with correct name', () => {
-    const mockBackend = { generate: async () => '{}' } as any;
+    const mockBackend = makeMockBackend();
     const rubric = {
       name: 'test',
       description: 'test',
@@ -551,7 +561,7 @@ describe('assertion factories', () => {
   });
 
   it('toNotBeOverridden creates assertion with correct name', () => {
-    const mockBackend = { generate: async () => '{}' } as any;
+    const mockBackend = makeMockBackend();
     const rubric = {
       name: 'test',
       description: 'test',

@@ -127,10 +127,10 @@ export function classifyAssertions(
 
   for (const item of assertions) {
     if ('tier' in item && 'assertion' in item) {
-      result.get(item.tier)!.push(item.assertion);
+      result.get(item.tier)?.push(item.assertion);
     } else {
       const tier = detectTier(item as Assertion);
-      result.get(tier)!.push(item as Assertion);
+      result.get(tier)?.push(item as Assertion);
     }
   }
 

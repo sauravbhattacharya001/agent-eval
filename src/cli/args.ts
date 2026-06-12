@@ -3,13 +3,17 @@
  */
 
 export interface ParsedArgs {
-  command: 'run' | 'version' | 'help';
+  command: 'run' | 'version' | 'help' | 'validate';
   paths: string[];
   bail: boolean;
   filter?: string;
   reporter: 'terminal' | 'json';
   timeoutMs: number;
   concurrency: number;
+  /** validate: emit machine-readable JSON instead of human text. */
+  json: boolean;
+  /** validate: require a FINISHED transcript (IN-PROGRESS stubs are errors). */
+  finished: boolean;
 }
 
 /**
@@ -27,6 +31,8 @@ export function parseCliArgs(argv: string[]): ParsedArgs | null {
       reporter: 'terminal',
       timeoutMs: 30_000,
       concurrency: 1,
+      json: false,
+      finished: false,
     };
   }
 
@@ -38,10 +44,41 @@ export function parseCliArgs(argv: string[]): ParsedArgs | null {
       reporter: 'terminal',
       timeoutMs: 30_000,
       concurrency: 1,
+      json: false,
+      finished: false,
     };
   }
 
   const command = args[0];
+
+  // Command: validate <file|dir> [--json] [--finished]
+  if (command === 'validate') {
+    const paths: string[] = [];
+    let json = false;
+    let finished = false;
+    for (let i = 1; i < args.length; i++) {
+      const arg = args[i];
+      if (arg === undefined) continue;
+      if (arg === '--json') {
+        json = true;
+      } else if (arg === '--finished' || arg === '--strict') {
+        finished = true;
+      } else if (!arg.startsWith('-')) {
+        paths.push(arg);
+      }
+    }
+    return {
+      command: 'validate',
+      paths,
+      bail: false,
+      reporter: 'terminal',
+      timeoutMs: 30_000,
+      concurrency: 1,
+      json,
+      finished,
+    };
+  }
+
   if (command !== 'run') {
     return null;
   }
@@ -87,5 +124,5 @@ export function parseCliArgs(argv: string[]): ParsedArgs | null {
     }
   }
 
-  return { command: 'run', paths, bail, filter, reporter, timeoutMs, concurrency };
+  return { command: 'run', paths, bail, filter, reporter, timeoutMs, concurrency, json: false, finished: false };
 }

@@ -408,6 +408,10 @@ export {
   formatScorecard,
   formatScorecardMarkdown,
   buildScorecard,
+  validateTranscript,
+  validateParsedTranscript,
+  TRANSCRIPT_CONTRACT_V1,
+  CONTRACT_OUTCOME_TOKENS,
 } from './monitoring/index.js';
 export type {
   Transcript,
@@ -454,6 +458,10 @@ export type {
   AggregateScorecardOptions,
   BuildScorecardOptions,
   BuildScorecardResult,
+  ContractViolation,
+  ContractValidationResult,
+  ContractSection,
+  ViolationSeverity,
 } from './monitoring/index.js';
 
 // Chain Runner (Multi-step Prompt Sequences)

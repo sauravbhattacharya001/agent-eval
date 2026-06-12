@@ -151,3 +151,19 @@ export type {
   WorkerName,
   OutcomeStatus,
 } from './types.js';
+
+// ─── Transcript Contract (v1) ─────────────────────────────────────
+
+export {
+  validateTranscript,
+  validateParsedTranscript,
+  TRANSCRIPT_CONTRACT_V1,
+  CONTRACT_OUTCOME_TOKENS,
+} from './contract.js';
+
+export type {
+  ContractViolation,
+  ContractValidationResult,
+  ContractSection,
+  ViolationSeverity,
+} from './contract.js';

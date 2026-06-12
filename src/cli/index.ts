@@ -5,10 +5,13 @@
  */
 
 import { pathToFileURL } from 'node:url';
+import { readFile, stat, readdir } from 'node:fs/promises';
+import { join, basename } from 'node:path';
 import { runSuites } from '../core/runner.js';
 import { TerminalReporter, JsonReporter } from '../core/reporter.js';
 import { parseCliArgs } from './args.js';
 import { discoverSpecs } from './discover.js';
+import { validateTranscript } from '../monitoring/contract.js';
 import type { EvalSuiteDefinition, Reporter } from '../core/types.js';
 
 function printHelp(): void {
@@ -16,22 +19,28 @@ function printHelp(): void {
 agent-eval — Test and evaluate AI agent outputs
 
 Usage:
-  agent-eval run <specs-dir|file>  Run eval specs from directory or file
-  agent-eval --version             Show version
-  agent-eval --help                Show this help
+  agent-eval run <specs-dir|file>      Run eval specs from directory or file
+  agent-eval validate <file|dir>       Validate transcript(s) against the contract
+  agent-eval --version                 Show version
+  agent-eval --help                    Show this help
 
-Options:
+Options (run):
   --bail, -b                Stop on first failure
   --filter, -f <pattern>   Only run specs matching pattern (regex)
   --reporter, -r <name>    Reporter: terminal (default) or json
   --timeout, -t <ms>       Default timeout per spec (default: 30000)
   --concurrency, -c <n>    Max parallel specs (default: 1)
 
+Options (validate):
+  --json                   Emit machine-readable JSON instead of text
+  --finished               Require a finished transcript (IN-PROGRESS = error)
+
 Examples:
   agent-eval run ./specs/
-  agent-eval run ./specs/code-gen.eval.ts
   agent-eval run ./specs/ --bail --filter "hallucination"
-  agent-eval run ./specs/ --reporter json > results.json
+  agent-eval validate ./transcripts/builder/2026-06-05-1000.md
+  agent-eval validate ./transcripts/ --finished
+  agent-eval validate ./run.md --json
 `);
 }
 
@@ -78,6 +87,11 @@ async function main(): Promise<void> {
   if (parsed.command === 'help') {
     printHelp();
     process.exit(0);
+    return;
+  }
+
+  if (parsed.command === 'validate') {
+    await runValidate(parsed.paths, { json: parsed.json, finished: parsed.finished });
     return;
   }
 
@@ -154,3 +168,124 @@ main().catch((err: unknown) => {
   console.error('Unexpected error:', err);
   process.exit(1);
 });
+
+/**
+ * Collect transcript markdown files from a path (a single .md file or a
+ * directory tree). Used by `agent-eval validate`.
+ */
+async function collectTranscriptFiles(p: string): Promise<string[]> {
+  const info = await stat(p);
+  if (info.isFile()) return [p];
+  const out: string[] = [];
+  const walk = async (dir: string): Promise<void> => {
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const e of entries) {
+      const full = join(dir, e.name);
+      if (e.isDirectory()) {
+        await walk(full);
+      } else if (e.isFile() && e.name.toLowerCase().endsWith('.md')) {
+        out.push(full);
+      }
+    }
+  };
+  await walk(p);
+  out.sort();
+  return out;
+}
+
+/**
+ * `agent-eval validate <file|dir>` - check transcript(s) against the contract.
+ * Exit code 0 when all are valid, 1 when any has an error-severity violation.
+ */
+async function runValidate(
+  paths: string[],
+  opts: { json: boolean; finished: boolean },
+): Promise<void> {
+  if (paths.length === 0) {
+    console.error('No path provided. Usage: agent-eval validate <file|dir> [--json] [--finished]');
+    process.exit(1);
+    return;
+  }
+
+  const files: string[] = [];
+  for (const p of paths) {
+    try {
+      files.push(...(await collectTranscriptFiles(p)));
+    } catch {
+      console.error(`Path not found: ${p}`);
+      process.exit(1);
+      return;
+    }
+  }
+
+  if (files.length === 0) {
+    console.error('No .md transcript files found.');
+    process.exit(1);
+    return;
+  }
+
+  const results = [] as Array<{
+    file: string;
+    valid: boolean;
+    version: string;
+    errors: { code: string; field: string; message: string }[];
+    warnings: { code: string; field: string; message: string }[];
+  }>;
+
+  for (const file of files) {
+    const text = await readFile(file, 'utf8');
+    const res = validateTranscript(text, {
+      filename: file,
+      allowInProgress: !opts.finished,
+    });
+    results.push({
+      file,
+      valid: res.valid,
+      version: res.version,
+      errors: res.errors.map((v) => ({ code: v.code, field: v.field, message: v.message })),
+      warnings: res.warnings.map((v) => ({ code: v.code, field: v.field, message: v.message })),
+    });
+  }
+
+  const failed = results.filter((r) => !r.valid).length;
+
+  if (opts.json) {
+    console.log(
+      JSON.stringify(
+        {
+          version: results[0]?.version ?? 'transcript-contract@v1',
+          total: results.length,
+          valid: results.length - failed,
+          invalid: failed,
+          results,
+        },
+        null,
+        2,
+      ),
+    );
+    process.exit(failed > 0 ? 1 : 0);
+    return;
+  }
+
+  for (const r of results) {
+    const label = basename(r.file);
+    if (r.valid && r.warnings.length === 0) {
+      console.log(`\u2705 ${label} - valid (${r.version})`);
+    } else if (r.valid) {
+      console.log(`\u26a0\ufe0f  ${label} - valid with ${r.warnings.length} warning(s)`);
+      for (const w of r.warnings) console.log(`     - [${w.field}] ${w.message}`);
+    } else {
+      console.log(`\u274c ${label} - ${r.errors.length} error(s)`);
+      for (const e of r.errors) console.log(`     - [${e.field}] ${e.message}`);
+      for (const w of r.warnings) console.log(`     - (warn) [${w.field}] ${w.message}`);
+    }
+  }
+
+  if (results.length > 1) {
+    console.log(
+      `\n${results.length - failed}/${results.length} valid, ${failed} invalid (${results[0]?.version ?? 'transcript-contract@v1'}).`,
+    );
+  }
+
+  process.exit(failed > 0 ? 1 : 0);
+}

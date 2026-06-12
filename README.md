@@ -32,6 +32,26 @@ agent-eval is built on an **independence-first** hierarchy:
 
 Most agent failures (stale runs, crashes, format violations, hallucinated paths, incomplete output) are catchable with Tier 1+2 alone. Model-as-judge handles the remaining ~20% — genuine subjective quality calls.
 
+### Two axes: independence *and* gate-vs-grade
+
+The tier table above is the **independence** axis (can the agent forge the result?). There's a second, orthogonal axis that matters just as much — whether a signal **gates** or **grades**:
+
+| | **Gate** | **Grade** |
+|---|---|---|
+| Question | *Did the agent do the thing?* | *How well does the output match the task?* |
+| Output | binary — `pass` / `fail` | a score on a 0–1 gradient |
+| Right verdict | `fail` is meaningful | a low score is **information, not a failure** |
+| Examples | non-empty, valid JSON, not-abandoned, meaningful diff, **verification** | relevance, keyword-coverage |
+
+A grade answering *"how well"* should never be coerced into a *"did it / didn't it"* — a 0.00 relevance score against a vague prompt is a real, low **grade**, not a failed gate.
+
+**Who decides a signal is a gate matters more than its tier.** The same Tier-2 check behaves differently depending on the surface:
+
+- **You assert on it** (`tier2(toBeRelevantTo(task))` via [`runTiered`](#tiered-runner-cost-pyramid)) → it **gates**. You opted in; a binary pass/fail is what you asked for. Here "tier" is a *cost ordering* (run cheap checks first, short-circuit) — failures are expected and intended.
+- **The system auto-scores it** (`relevance` / `keyword-coverage` in [`scoreTranscript`](#ci-quality-gate-github-action)) → it **grades**. You didn't opt in; the scorer applies it to *every* transcript, so a low grade caps at `warn` and never silently inflates the failure count. (Tier 1 auto-scores still gate — they're forge-proof and unambiguous.)
+
+So: *gate when the author chose this signal as a bar to clear; grade when the system is scoring quality the author didn't single out.*
+
 ## Benchmark Results
 
 We ran 10 adversarial scenarios (64 assertions, all 3 tiers) against 5 models via Groq:

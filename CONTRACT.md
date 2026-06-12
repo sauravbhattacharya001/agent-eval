@@ -151,6 +151,23 @@ if (!res.valid) {
 }
 ```
 
+### Validation gates; scoring grades
+
+There are two distinct evaluation surfaces, and they answer different questions:
+
+| | `validate` (this contract) | `scoreTranscript` (quality monitoring) |
+|---|---|---|
+| Asks | *Is this a well-formed, finished transcript?* | *How good was the run?* |
+| Verdict | a **gate** — exit `0` / `1`; one error-severity violation fails | a mix of **gates** and **grades** across checks |
+| Use | CI compliance bar | trend dashboards, regression spotting |
+
+Within `scoreTranscript`, each check is itself either a **gate** or a **grade**:
+
+- **Gates** (`completeness`, `staleness`, `verification`, …) ask *did the agent do the thing?* — they may emit `fail`.
+- **Grades** (`relevance`, `keyword-coverage`) ask *how well does the output match the task?* — they report a 0–1 score and cap at `warn`. **A low grade is information, not a failure**, so it never inflates the failure count or fails a gate on its own.
+
+The `## Outcome` token in this contract (`pass`/`fail`/`partial`) is the **agent's own self-report** of the run — a *third* thing again, independent of both the validator and the scorer. The `verification` gate exists precisely to catch when that self-report disagrees with ground truth (the agent claims `pass` but the orchestrator recorded an error).
+
 ---
 
 ## Agent instruction block

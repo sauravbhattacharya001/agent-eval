@@ -499,6 +499,122 @@ describe('evaluateCiRun - end to end', () => {
   });
 });
 
+// ─── evaluateCiRun - per-check evidence enrichment ────────────────────────────
+
+/**
+ * The fleet adapter can only see the synthetic one-worker scorecard, so its
+ * `eval_evidence` names the failing check but not *why* it failed. `evaluateCiRun`
+ * splices the rich per-check `summary` ("no-op: bare acknowledgement only …") in
+ * front of that worker-level line so the gate output is self-explanatory. These
+ * tests pin that contract: the *reason* must reach `eval_evidence`, a clean pass
+ * must stay quiet, and warnings must only ride along once something failed.
+ */
+describe('evaluateCiRun - per-check evidence enrichment', () => {
+  /** Find the staleness check's exact summary string for a given output. */
+  function stalenessSummary(output: string): string {
+    const r = scoreCiRun({ prompt: REVIEW_PROMPT, output });
+    const stale = r.checks.find((c) => c.check === 'staleness');
+    if (!stale) throw new Error('no staleness check');
+    return stale.summary;
+  }
+
+  it('surfaces the specific staleness reason in eval_evidence (not just the check name)', () => {
+    const result = evaluateCiRun({
+      prompt: REVIEW_PROMPT,
+      output: NOOP_ONTOPIC,
+      worker: 'claude-review',
+      now: FIXED_NOW,
+    });
+    const evidence = toActionOutputs(result.evaluation).eval_evidence;
+
+    // The exact per-check reason the deterministic check computed is present
+    // verbatim - this is the line a maintainer acts on.
+    expect(evidence).toContain(`claude-review/staleness: ${stalenessSummary(NOOP_ONTOPIC)}`);
+    // The reason leads; the coarse worker-level grade still follows it.
+    expect(evidence.indexOf('claude-review/staleness:')).toBeLessThan(
+      evidence.indexOf('claude-review: '),
+    );
+    // And it is strictly richer than the worker-level line alone.
+    expect(evidence).toContain('top failure: staleness');
+  });
+
+  it('a bare-acknowledgement no-op names the acknowledgement in the evidence', () => {
+    const result = evaluateCiRun({
+      prompt: REVIEW_PROMPT,
+      output: 'LGTM, no changes needed.',
+      worker: 'claude-review',
+      now: FIXED_NOW,
+    });
+    const evidence = toActionOutputs(result.evaluation).eval_evidence;
+    expect(result.evaluation.passed).toBe(false);
+    expect(evidence).toContain('bare acknowledgement only');
+  });
+
+  it('an empty/abandoned run names "no actionable content" in the evidence', () => {
+    const result = evaluateCiRun({
+      prompt: REVIEW_PROMPT,
+      output: NOOP_ONTOPIC,
+      worker: 'claude-review',
+      now: FIXED_NOW,
+    });
+    // NOOP_ONTOPIC is a long on-topic narration with nothing to act on.
+    expect(toActionOutputs(result.evaluation).eval_evidence).toMatch(/no actionable content|bare acknowledgement/);
+  });
+
+  it('a clean pass keeps eval_evidence empty (no per-check noise on success)', () => {
+    const result = evaluateCiRun({
+      prompt: REVIEW_PROMPT,
+      output: GOOD_REVIEW,
+      worker: 'claude-review',
+      now: FIXED_NOW,
+    });
+    expect(result.evaluation.passed).toBe(true);
+    expect(toActionOutputs(result.evaluation).eval_evidence).toBe('');
+    expect(result.evaluation.evidence).toHaveLength(0);
+  });
+
+  it('every failing check contributes exactly one evidence line, prefixed worker/check', () => {
+    const result = evaluateCiRun({
+      prompt: REVIEW_PROMPT,
+      output: '',
+      worker: 'claude-review',
+      now: FIXED_NOW,
+    });
+    const failing = result.checks.filter((c) => c.status === 'fail');
+    expect(failing.length).toBeGreaterThan(0);
+    for (const c of failing) {
+      const line = result.evaluation.evidence.find(
+        (e) => e.message === `claude-review/${c.check}: ${c.summary}`,
+      );
+      expect(line, `evidence line for ${c.check}`).toBeDefined();
+    }
+  });
+
+  it('a failing check marks its evidence severity critical; a warn is warning', () => {
+    const result = evaluateCiRun({
+      prompt: REVIEW_PROMPT,
+      output: NOOP_ONTOPIC,
+      worker: 'claude-review',
+      now: FIXED_NOW,
+    });
+    const failLine = result.evaluation.evidence.find((e) =>
+      e.message.startsWith('claude-review/staleness:'),
+    );
+    expect(failLine?.severity).toBe('critical');
+  });
+
+  it('the enrichment respects a custom worker name', () => {
+    const result = evaluateCiRun({
+      prompt: REVIEW_PROMPT,
+      output: NOOP_ONTOPIC,
+      worker: 'pr-review-bot',
+      now: FIXED_NOW,
+    });
+    expect(toActionOutputs(result.evaluation).eval_evidence).toContain('pr-review-bot/staleness:');
+  });
+});
+
+
 // ─── package-root surface ────────────────────────────────────────────────────────
 
 describe('package root re-exports the CI run evaluator', () => {

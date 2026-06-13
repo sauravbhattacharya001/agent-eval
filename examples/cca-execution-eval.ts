@@ -5,10 +5,11 @@
  * `${RUNNER_TEMP}/claude-execution-output.json` and exposes that path as the
  * `execution_file` GitHub Action output. This script reads that file, projects
  * it into `{ prompt, output, timeline }` with `extractCcaRunFromFile`, and runs
- * `evaluateCiRun` over it — the four Tier 1 / Tier 2 checks (completeness,
- * coverage, relevance, staleness), no model-as-judge — then emits GitHub Action
- * outputs + a step summary and exits non-zero if the run did not address its
- * prompt or produced nothing actionable.
+ * `evaluateCiRun` over it — the two Tier 1 deterministic checks (completeness and
+ * staleness), no model-as-judge — then emits GitHub Action outputs + a step
+ * summary and exits non-zero if the run produced nothing actionable or was
+ * abandoned. The `eval_evidence` output carries the *specific* failing-check
+ * reason (e.g. `staleness: no-op: bare acknowledgement only`).
  *
  * It is the out-of-process integration mode described in
  * docs/claude-code-action-integration.md: a downstream workflow step that runs
@@ -56,9 +57,10 @@ function main(): void {
   }
 
   // The prompt is not in the execution file (the action passes it via a prompt
-  // file), so supply the same prompt the action was given. Without it the
-  // coverage/relevance checks have no reference and the gate leans on
-  // completeness + staleness only.
+  // file), so supply the same prompt the action was given when you have it. The
+  // two deterministic gate checks (completeness + staleness) read only the
+  // output and do not need the prompt; it is kept here for context and for any
+  // future reference-aware check.
   const prompt = process.env.AGENT_PROMPT ?? '';
   const worker = process.env.AGENT_EVAL_WORKER ?? 'claude-code-action';
   const gate = (process.env.AGENT_EVAL_GATE as GateGrade | undefined) ?? 'watch';

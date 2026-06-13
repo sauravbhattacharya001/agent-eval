@@ -77,7 +77,7 @@ import { aggregateScorecard } from '../monitoring/scorecard.js';
 import type { CheckScore, TranscriptScore } from '../monitoring/scorer.js';
 
 import { evaluateForAction } from './adapter.js';
-import type { ActionEvaluation, EvaluateForActionOptions } from './adapter.js';
+import type { ActionEvaluation, ActionEvidence, EvaluateForActionOptions } from './adapter.js';
 
 // ─── TYPES ──────────────────────────────────────────────────────────────────────
 
@@ -627,6 +627,12 @@ export function scoreCiRun(
  * with any failing check trips the gate (`gate: 'watch'` by default here, which
  * is stricter than the fleet default - a single CI run should be clean).
  *
+ * On top of the fleet projection, the per-check **reasons** are spliced into
+ * `evaluation.evidence` (and therefore `eval_evidence`): the worker-level
+ * scorecard line names the failing check, while these add the specific
+ * `summary` ("no-op: bare acknowledgement only …") a maintainer needs to act on
+ * without re-running. Reasons are added only when at least one check failed.
+ *
  * @param options - Prompt, output, worker name, thresholds, and gate options.
  */
 export function evaluateCiRun(options: EvaluateCiRunOptions): CiRunEvaluation {
@@ -672,5 +678,63 @@ export function evaluateCiRun(options: EvaluateCiRunOptions): CiRunEvaluation {
   };
   const evaluation = evaluateForAction(scorecard, actionOptions);
 
+  // Enrich the evidence with the *specific* per-check reasons. The fleet adapter
+  // can only see the synthetic scorecard, so on its own `eval_evidence` reads
+  // `claude-review: at-risk (0% pass), top failure: staleness (1)` — it names the
+  // failing check but not *why* it failed. For a single CI run we still have the
+  // rich per-check `summary` in hand ("no-op: bare acknowledgement only …"), which
+  // is the line a maintainer actually needs to act on. Splice those reasons in so
+  // the gate's `eval_evidence` is self-explanatory without a re-run.
+  evaluation.evidence = withCheckReasons(evaluation.evidence, checks, worker);
+
   return { evaluation, checks, completeness, staleness };
+}
+
+/**
+ * Map a single-run check status to the {@link ActionEvidence} severity used by
+ * the shared adapter (so the per-check reasons render with the same icons as the
+ * worker-level findings): a hard fail is `critical`, a `warn` is `warning`.
+ */
+function severityForStatus(status: CiCheckStatus): ActionEvidence['severity'] {
+  return status === 'fail' ? 'critical' : 'warning';
+}
+
+/**
+ * Prepend the concrete per-check reasons (the rich {@link CiCheckResult.summary})
+ * for every failing — and, if any check failed, every warning — check ahead of
+ * the worker-level evidence the fleet adapter produced.
+ *
+ * Why this shape:
+ *   - **Failing checks always surface their reason.** `staleness: no-op: bare
+ *     acknowledgement only (bare approval)` is what tells a reviewer the run
+ *     said nothing actionable; without it the gate just says "staleness failed".
+ *   - **Warnings ride along only when something failed.** A clean run that merely
+ *     warns (e.g. a thin-but-non-empty review) should not spam `eval_evidence`
+ *     on a pass; but once the gate is already red, an adjacent warning is useful
+ *     context for the human triaging it.
+ *   - **Pure projection, no new judgement.** Every string here is a `summary`
+ *     the deterministic checks already computed — this only changes *where* that
+ *     signal is surfaced, keeping the module Tier 1/Tier 2.
+ *
+ * The original worker-level evidence (grade + pass rate + trend) is preserved
+ * after the per-check lines so both the headline grade and the specific cause
+ * are visible.
+ */
+function withCheckReasons(
+  existing: readonly ActionEvidence[],
+  checks: readonly CiCheckResult[],
+  worker: string,
+): ActionEvidence[] {
+  const anyFail = checks.some((c) => c.status === 'fail');
+  if (!anyFail) return [...existing];
+
+  const reasons: ActionEvidence[] = checks
+    .filter((c) => c.status === 'fail' || c.status === 'warn')
+    .map((c) => ({
+      worker,
+      severity: severityForStatus(c.status),
+      message: `${worker}/${c.check}: ${c.summary}`,
+    }));
+
+  return [...reasons, ...existing];
 }

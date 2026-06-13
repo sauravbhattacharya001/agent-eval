@@ -225,7 +225,8 @@ Any one failing trips the gate.
   execution-file parser/extractor (`parseCcaExecutionLog`, `extractCcaRun`,
   `extractCcaRunFromFile`).
 - [`src/action/ci-run.ts`](../src/action/ci-run.ts) — `evaluateCiRun` and the
-  four-check scoring core.
+  two-check (completeness + staleness) scoring core; surfaces the specific
+  failing-check reason in `eval_evidence`.
 - [`examples/cca-execution-eval.ts`](../examples/cca-execution-eval.ts) — a
   runnable downstream-step entry point.
 - [README → Evaluating a single run](../README.md#evaluating-a-single-run-one-pr--one-issue)

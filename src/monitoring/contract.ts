@@ -3,8 +3,9 @@
  * ========================
  *
  * The agent-eval transcript contract is the interface between transcript
- * PRODUCERS (an AI agent following an instruction block, a tool like AgentLens,
- * or a hand-written file) and the agent-eval CONSUMER (parsing + scoring).
+ * PRODUCERS (an AI agent following an instruction block, a programmatic
+ * exporter, or a hand-written file) and the agent-eval CONSUMER (parsing +
+ * scoring).
  *
  * This module is the single source of truth for that contract. The schema here
  * MUST stay in sync with:

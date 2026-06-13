@@ -13,7 +13,7 @@ You can satisfy this contract three ways, in increasing order of guarantee:
 2. **Validate in CI** â€” run [`agent-eval validate`](#validating) on the
    transcripts your agent writes, so a non-compliant transcript fails loudly
    instead of being silently mis-scored.
-3. **Generate them** â€” have a tool (e.g. AgentLens) emit transcripts directly to
+3. **Generate them** â€” have a dedicated export tool emit transcripts directly to
    this schema, so compliance is guaranteed by construction. Use both for maximum
    effectiveness; neither is required to use the other.
 

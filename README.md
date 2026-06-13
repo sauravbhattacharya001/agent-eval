@@ -529,8 +529,8 @@ It flags three unfakeable mismatches: a finished outcome that contradicts the
 trusted exit status (hard fail), a transcript that reports done while the run is
 still running (warn), and a self-reported duration that disagrees with the
 measured wall-clock (warn). With no `runMetadata` the check **skips** — zero
-behavior change. [AgentLens](../../agentlens) emits this metadata directly via
-`export_run_metadata()`, making the capture → transcript → eval path
+behavior change. A transcript export tool can emit this metadata directly
+alongside the transcript, making the capture → transcript → eval path
 self-verifying end to end.
 
 | `RunMetadata` field | Meaning |

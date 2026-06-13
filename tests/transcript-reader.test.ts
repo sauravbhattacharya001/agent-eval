@@ -61,16 +61,16 @@ const BUILDER_TRANSCRIPT = `# Builder Run - 2026-06-05 10:00 PT
 Recurring cron (10 AM PT): Add a small/medium agentic feature to a random repo.
 
 ## Actions Taken
-1. Selected target repo agentlens
+1. Selected target repo toolforge
 2. Wrote part 6 of \`tool_dependency_advisor.py\`
 3. Verified Python syntax with \`ast.parse()\` - passed
 4. Wrote test file with 17 test cases
 
 ## Key Outputs
 - Commit \`6f5c1ae\` feat: add ToolDependencyAdvisor
-- New file: \`sdk/agentlens/tool_dependency_advisor.py\` (~900 lines)
-- Modified: \`sdk/agentlens/__init__.py\` (added 12 exports)
-- See https://github.com/sauravbhattacharya001/agentlens for details
+- New file: \`sdk/toolforge/tool_dependency_advisor.py\` (~900 lines)
+- Modified: \`sdk/toolforge/__init__.py\` (added 12 exports)
+- See https://github.com/example-org/toolforge for details
 - Closes #142
 
 ## Outcome
@@ -549,7 +549,7 @@ describe('extractReferences', () => {
       filename: 'builder/2026-06-05-1000.md',
     });
     const urls = t.references.filter((r) => r.kind === 'url').map((r) => r.value);
-    expect(urls).toContain('https://github.com/sauravbhattacharya001/agentlens');
+    expect(urls).toContain('https://github.com/example-org/toolforge');
   });
 
   it('extracts issue numbers like #142', () => {

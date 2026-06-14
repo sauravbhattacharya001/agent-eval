@@ -1,8 +1,12 @@
 # agent-eval
 
-A lightweight TypeScript framework for testing and evaluating AI agent outputs.
+A lightweight, zero-dependency TypeScript toolkit for evaluating AI agent outputs - in tests, in production transcripts, and as a CI gate.
 
-Think: **Jest/Vitest but for agent outputs** instead of functions.
+Three ways to use it:
+
+- **Eval framework** - Jest/Vitest-style assertions for agent outputs, with a 3-tier pyramid (deterministic → heuristic → model-as-judge).
+- **Fleet monitoring** - score a directory of run transcripts, track score trends over time, and roll them up into a health scorecard.
+- **CI quality gate** - block a GitHub Action when an agent's output is empty, stale, off-task, or contradicts the run's real outcome.
 
 ## Features
 
@@ -267,6 +271,42 @@ npx agent-eval run ./specs/
 npx agent-eval --version
 npx agent-eval --help
 ```
+
+## Fleet Monitoring
+
+Point it at a directory of agent run transcripts and get per-run scores, score trends over time, and a rolled-up health grade - the same Tier 1+2 signals as the eval framework, applied to real production runs (no model-as-judge, so it's deterministic and free).
+
+```typescript
+import {
+  discoverTranscripts, scoreTranscripts, writeScores,
+  scoreHistory, detectTrendsFromDisk, buildScorecard,
+} from 'agent-eval';
+
+// 1. Discover + score every transcript in a directory
+const transcripts = discoverTranscripts('./transcripts');
+const scores = scoreTranscripts(transcripts);
+writeScores('./scores', scores);              // append to the score store
+
+// 2. Track how scores move over a rolling window
+const history = scoreHistory('./scores', { window: 14 });
+const trends = detectTrendsFromDisk('./scores', { window: 14 });
+// trends => per-worker direction: improving | flat | regressing
+
+// 3. Roll the window up into one health grade
+const card = buildScorecard('./scores', { window: 7 });
+console.log(card.grade);  // healthy | watch | at-risk | critical
+```
+
+| Entry point | What it does |
+|-------------|--------------|
+| `discoverTranscripts(dir)` | Find transcript files under a directory |
+| `scoreTranscript(t)` / `scoreTranscripts(ts)` | Score one / many runs (Tier 1+2) |
+| `writeScores(dir, scores)` | Append scores to an on-disk store |
+| `scoreHistory(dir, opts)` | Per-run score series over a window |
+| `detectTrendsFromDisk(dir, opts)` | Per-worker trend direction over a window |
+| `buildScorecard(dir, opts)` | Fleet health grade for the window |
+
+`scoreTranscript` also accepts `runMetadata` to cross-check a run's self-reported outcome against trusted orchestrator data - see [Verifying claims against ground truth](#ci-quality-gate-github-action).
 
 ## CI Quality Gate (GitHub Action)
 

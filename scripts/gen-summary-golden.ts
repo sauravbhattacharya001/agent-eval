@@ -99,6 +99,18 @@ const SCENARIOS: readonly Scenario[] = [
       'gate fails, the step exits `1`, and the **Findings** section names the ' +
       'specific reason a maintainer needs to act on — not just "a check failed".',
   },
+  {
+    fixture: 'abandoned-no-result',
+    heading: 'Failing run — abandoned mid-task',
+    blurb:
+      'A different no-op mode: the agent started, read a file, said it *would* ' +
+      'check the Redis usage next — then stopped. The execution log ends on a ' +
+      'pending tool call with no result event, so the run was abandoned before it ' +
+      'produced anything to act on (the timeout / silently-abandoned-check mode ' +
+      'from the open issues). The text is on-topic and non-empty, so completeness ' +
+      'still passes — but **staleness** flags the absent actionable output, the ' +
+      'gate fails, and the step exits `1`.',
+  },
 ];
 
 /**
@@ -122,8 +134,9 @@ export function buildDoc(): string {
   lines.push(
     'This page shows the exact Markdown the CI eval step writes to ' +
       '[`$GITHUB_STEP_SUMMARY`](https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions#adding-a-job-summary) ' +
-      '— the block a reviewer sees on the Action run page — for a **passing** and a ' +
-      '**failing** single CI run. Both are rendered offline by the real ' +
+      '— the block a reviewer sees on the Action run page — for a **passing** run and ' +
+      'two distinct **failing** runs (a stale "LGTM" no-op and an abandoned ' +
+      'mid-task run). All three are rendered offline by the real ' +
       '`parse → evaluateCiRun → renderActionSummary` chain (Tier 1 completeness + ' +
       'staleness; no model-as-judge, no network). The companion ' +
       '`examples/workflows/pr-review-with-eval.yml` shows the workflow that emits them.',

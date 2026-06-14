@@ -68,6 +68,22 @@ describe('step-summary golden doc — documents the two scenarios faithfully', (
     expect(failing).toContain('claude-review: at-risk');
   });
 
+  it('shows a second failing mode (abandoned mid-task): no actionable content, completeness still passes', () => {
+    const abandoned = sectionFor(committed, 'Failing run — abandoned mid-task');
+    expect(abandoned).toContain('## ❌ Agent Eval — failed');
+    expect(abandoned).toContain('FAIL — 1/1 workers below gate (watch)');
+    expect(abandoned).toContain('### Findings');
+    // This mode is distinct from the LGTM no-op: the staleness reason is the
+    // *absence of actionable content*, not a bare approval. Pin that specific
+    // wording so the doc keeps demonstrating the #1361 timeout/abandonment mode.
+    expect(abandoned).toMatch(/🔴 claude-review\/staleness: no-op: no actionable content/);
+    // The text was on-topic and non-empty, so completeness is NOT the failing
+    // check here — it still passes (1.00). That contrast (complete yet stale) is
+    // the point of showing this fixture alongside the LGTM one.
+    expect(abandoned).toMatch(/\| completeness \| 1\.00 \| 1 \| 0 \| 0 \| 1 \|/);
+    expect(abandoned).toMatch(/\| staleness \| 0\.00 \| 0 \| 0 \| 1 \| 1 \|/);
+  });
+
   it('cross-references the companion workflow example (so the two stay discoverable)', () => {
     expect(committed).toContain('examples/workflows/pr-review-with-eval.yml');
   });

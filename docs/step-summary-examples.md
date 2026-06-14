@@ -2,7 +2,7 @@
 
 > **Generated file — do not edit by hand.** Produced by `scripts/gen-summary-golden.ts` from the committed execution fixtures in `tests/fixtures/cca-runs/`, and pinned byte-for-byte by `tests/step-summary-golden.test.ts`. To update it, change the code/fixtures and re-run `npx tsx scripts/gen-summary-golden.ts`.
 
-This page shows the exact Markdown the CI eval step writes to [`$GITHUB_STEP_SUMMARY`](https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions#adding-a-job-summary) — the block a reviewer sees on the Action run page — for a **passing** and a **failing** single CI run. Both are rendered offline by the real `parse → evaluateCiRun → renderActionSummary` chain (Tier 1 completeness + staleness; no model-as-judge, no network). The companion `examples/workflows/pr-review-with-eval.yml` shows the workflow that emits them.
+This page shows the exact Markdown the CI eval step writes to [`$GITHUB_STEP_SUMMARY`](https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions#adding-a-job-summary) — the block a reviewer sees on the Action run page — for a **passing** run and two distinct **failing** runs (a stale "LGTM" no-op and an abandoned mid-task run). All three are rendered offline by the real `parse → evaluateCiRun → renderActionSummary` chain (Tier 1 completeness + staleness; no model-as-judge, no network). The companion `examples/workflows/pr-review-with-eval.yml` shows the workflow that emits them.
 
 Each example is the output for one fixture under `tests/fixtures/cca-runs/`, scored against the same PR-review prompt with the default thresholds and the `watch` gate the example workflow sets.
 
@@ -59,6 +59,46 @@ What the run page renders:
 ### Findings
 
 - 🔴 claude-review/staleness: no-op: run no_progress (1.0s); bare acknowledgement only (bare approval)
+- 🟡 claude-review: at-risk (0% pass), top failure: staleness (1)
+
+### Scorecard
+
+**Window:** all-time  
+**Generated:** 2026-06-13T12:00:00.000Z  
+**Fleet:** 1 worker(s) · 1 run(s) · pass 0% · mean 0.50 · trends ↓0 ↑0
+
+| Worker | Grade | Pass | Mean | Worst | Runs | Trend | Top failures |
+|---|---|---:|---:|---:|---:|:---:|---|
+| claude-review | RISK | 0% | 0.50 | 0.50 | 1 | · | staleness (1) |
+
+## Per-check breakdown
+
+### claude-review — RISK ·
+
+| Check | Mean | Pass | Warn | Fail | Runs |
+|---|---:|---:|---:|---:|---:|
+| staleness | 0.00 | 0 | 0 | 1 | 1 |
+| completeness | 1.00 | 1 | 0 | 0 | 1 |
+~~~~
+
+## Failing run — abandoned mid-task
+
+_Fixture: `tests/fixtures/cca-runs/abandoned-no-result.json`_
+
+A different no-op mode: the agent started, read a file, said it *would* check the Redis usage next — then stopped. The execution log ends on a pending tool call with no result event, so the run was abandoned before it produced anything to act on (the timeout / silently-abandoned-check mode from the open issues). The text is on-topic and non-empty, so completeness still passes — but **staleness** flags the absent actionable output, the gate fails, and the step exits `1`.
+
+What the run page renders:
+
+~~~~markdown
+## ❌ Agent Eval — failed
+
+> FAIL — 1/1 workers below gate (watch), mean score 0.5000
+
+**Gate:** `watch` · **Evaluated:** 1 worker(s) · **Failing:** 1 · **Fleet score:** 0.5000
+
+### Findings
+
+- 🔴 claude-review/staleness: no-op: no actionable content (no file refs, line numbers, code, directives, or findings)
 - 🟡 claude-review: at-risk (0% pass), top failure: staleness (1)
 
 ### Scorecard

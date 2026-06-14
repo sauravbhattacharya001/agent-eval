@@ -624,7 +624,8 @@ then gates the job on the eval step and branches a downstream step on
 `eval_passed`.
 [`docs/step-summary-examples.md`](docs/step-summary-examples.md) shows the exact
 `$GITHUB_STEP_SUMMARY` Markdown that workflow posts on the run page for a passing
-vs. a failing run (rendered from real fixtures, byte-for-byte pinned).
+run and two distinct failing runs (rendered from real fixtures, byte-for-byte
+pinned).
 [`docs/eval-layer-proposal.md`](docs/eval-layer-proposal.md) writes up the case
 for this as an *optional* runtime eval layer — the reported failure modes it
 targets, why the gate is deterministic-only, and the minimal opt-in shape.

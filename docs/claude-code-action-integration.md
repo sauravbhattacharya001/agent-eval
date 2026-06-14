@@ -237,7 +237,8 @@ Any one failing trips the gate.
 - [`examples/workflows/pr-review-with-eval.yml`](../examples/workflows/pr-review-with-eval.yml):
   the same wiring as a complete, copy-pasteable PR-review workflow file.
 - [`docs/step-summary-examples.md`](step-summary-examples.md) — the exact step
-  summary the gate posts on the run page (passing vs. failing), rendered from
-  fixtures and pinned byte-for-byte.
+  summary the gate posts on the run page (a passing run and two failing modes —
+  a stale no-op and an abandoned-mid-task run), rendered from fixtures and pinned
+  byte-for-byte.
 - [README → Evaluating a single run](../README.md#evaluating-a-single-run-one-pr--one-issue)
   — the check semantics and threshold knobs.

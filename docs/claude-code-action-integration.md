@@ -170,6 +170,11 @@ and a step summary, then exits non-zero when the run did not address its prompt
 or produced nothing actionable. Downstream steps can branch on
 `steps.<id>.outputs.eval_passed` without re-running the eval.
 
+[`examples/workflows/pr-review-with-eval.yml`](../examples/workflows/pr-review-with-eval.yml)
+is the same wiring as a complete, copy-pasteable workflow file (PR trigger,
+permissions, the `claude-code-action` step, the `always()`-guarded eval step, and
+a downstream step that branches on `eval_passed`).
+
 ## Integration mode B — in-process, inside the action's cleanup
 
 If the checks are upstreamed into `claude-code-action` itself, the natural home
@@ -229,5 +234,7 @@ Any one failing trips the gate.
   failing-check reason in `eval_evidence`.
 - [`examples/cca-execution-eval.ts`](../examples/cca-execution-eval.ts) — a
   runnable downstream-step entry point.
+- [`examples/workflows/pr-review-with-eval.yml`](../examples/workflows/pr-review-with-eval.yml):
+  the same wiring as a complete, copy-pasteable PR-review workflow file.
 - [README → Evaluating a single run](../README.md#evaluating-a-single-run-one-pr--one-issue)
   — the check semantics and threshold knobs.

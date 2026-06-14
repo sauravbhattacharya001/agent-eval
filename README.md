@@ -618,6 +618,10 @@ See [`docs/claude-code-action-integration.md`](docs/claude-code-action-integrati
 for the exact seam (both an out-of-process downstream step and an in-process
 cleanup-phase block) and [`examples/cca-execution-eval.ts`](examples/cca-execution-eval.ts)
 for a runnable entry point.
+[`examples/workflows/pr-review-with-eval.yml`](examples/workflows/pr-review-with-eval.yml)
+is a complete, copy-pasteable PR-review workflow: it runs `claude-code-action`,
+then gates the job on the eval step and branches a downstream step on
+`eval_passed`.
 [`docs/eval-layer-proposal.md`](docs/eval-layer-proposal.md) writes up the case
 for this as an *optional* runtime eval layer — the reported failure modes it
 targets, why the gate is deterministic-only, and the minimal opt-in shape.

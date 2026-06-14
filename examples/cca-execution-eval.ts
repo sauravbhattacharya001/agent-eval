@@ -11,9 +11,8 @@
  * abandoned. The `eval_evidence` output carries the *specific* failing-check
  * reason (e.g. `staleness: no-op: bare acknowledgement only`).
  *
- * It is the out-of-process integration mode described in
- * docs/claude-code-action-integration.md: a downstream workflow step that runs
- * *after* the claude-code-action step.
+ * It is the out-of-process integration mode: a downstream workflow step that
+ * runs *after* the claude-code-action step.
  *
  *   - name: Run Claude
  *     id: claude

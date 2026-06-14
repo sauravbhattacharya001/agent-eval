@@ -39,6 +39,19 @@
  *     timeout/abandonment. All of it is artifact pattern-counting and timestamp
  *     math; the "actionability" signal here is **not** a model-as-judge verdict -
  *     it asks "are concrete artifacts *present*?", never "is this *good*?".
+ *   - **Relevance / task-grounding** (Tier 2, {@link scoreRelevance}): the
+ *     failure neither of the above can see - an output that is well-formed *and*
+ *     superficially actionable yet about the **wrong thing**. The canonical case
+ *     is a project guidance file ("use pnpm", "prefer named exports") posted
+ *     verbatim instead of a review of the diff: it is long and structured
+ *     (passes completeness) and littered with paths, inline code, and directive
+ *     words (passes staleness), but it shares almost no salient vocabulary with
+ *     the prompt it was asked to address. {@link analyzeTaskGrounding} measures
+ *     the fraction of the **prompt's** salient terms the output echoes - the
+ *     reference point is the prompt, which the agent did not write, so a
+ *     fluent-but-off-task dump cannot forge coverage. It is deliberately
+ *     orthogonal to staleness: an on-topic no-op scores *high* on grounding
+ *     (it names the topics) and is caught by staleness instead.
  * No model-as-judge, offline, reproducible.
  *
  * The result is the **same** {@link ActionEvaluation} shape the fleet adapter
@@ -82,12 +95,12 @@ import type { ActionEvaluation, ActionEvidence, EvaluateForActionOptions } from 
 // ─── TYPES ──────────────────────────────────────────────────────────────────────
 
 /** Verdict for one single-run check, mirroring {@link CheckScore.status}. */
-export type CiCheckStatus = 'pass' | 'fail' | 'warn';
+export type CiCheckStatus = 'pass' | 'fail' | 'warn' | 'skip';
 
 /** One scored check for a single CI run. */
 export interface CiCheckResult {
   /** Which check produced this (one of the canonical scorer check names). */
-  check: 'completeness' | 'staleness';
+  check: 'completeness' | 'staleness' | 'relevance';
   /** Independence tier: 1 = deterministic, 2 = heuristic. */
   tier: 1 | 2;
   /** Normalized score in [0, 1], 1 = best. */
@@ -121,6 +134,31 @@ export interface EvaluateCiRunOptions {
    * is a hard `fail` (a no-op review). Default: 2.
    */
   minActionableArtifacts?: number;
+  /**
+   * Minimum fraction (0-1) of the prompt's *salient vocabulary* the output must
+   * echo to pass the **relevance** (task-grounding) check. A genuine review of a
+   * specific diff reuses the prompt's nouns - the files, symbols, and concepts it
+   * was asked about - so it covers most of them; parroted boilerplate (a project
+   * guidance file posted verbatim, the #1302 mode) covers almost none. Below this
+   * an output that is *substantive* (see {@link relevanceMinPromptTerms} /
+   * {@link relevanceMinOutputChars}) is a hard `fail` - it ignored THIS task.
+   * Default: 0.25.
+   */
+  minPromptRelevance?: number;
+  /**
+   * The relevance check only runs when the prompt carries at least this many
+   * distinct salient terms (after stopword removal). A one-word or empty prompt
+   * cannot ground anything, so the check `skip`s rather than guessing. Default: 4.
+   */
+  relevanceMinPromptTerms?: number;
+  /**
+   * The relevance check only *fails* an output at least this long. A genuinely
+   * short answer ("Use `INCR` on the login limiter.") may legitimately echo only
+   * one or two prompt terms; the parroting failure mode is a *long* off-topic
+   * dump. Below this length, low coverage is a `warn`, not a hard `fail`.
+   * Default: 200.
+   */
+  relevanceMinOutputChars?: number;
   /**
    * The agent's *previous* output for the same target (e.g. the prior review
    * comment on this PR). When supplied, the staleness check flags a verbatim or
@@ -170,6 +208,8 @@ export interface CiRunEvaluation {
   completeness: CompletenessResult;
   /** The Tier 1 staleness analysis (no-op: did it emit anything actionable?). */
   staleness: StalenessAnalysis;
+  /** The Tier 2 task-grounding analysis (is the output about THIS prompt?). */
+  relevance: TaskGroundingResult;
 }
 
 /** Which concrete actionable artifacts were found in the output. */
@@ -204,12 +244,80 @@ export interface StalenessAnalysis {
   timeline?: StalenessResult;
 }
 
+/**
+ * The Tier 2 task-grounding analysis for one CI run: how much of the prompt's
+ * salient vocabulary the output actually engages with. This is the signal that
+ * separates a real review of a specific diff (which reuses the task's nouns -
+ * the files, symbols, and concepts it was asked about) from boilerplate that
+ * ignores the task entirely (a project guidance file reposted verbatim - #1302).
+ *
+ * It is **independent** in the Tier-2 sense: the reference point is the *prompt*,
+ * which the evaluated agent did not write. An agent cannot fake overlap with a
+ * task it never read. It is deliberately distinct from staleness (an output can
+ * be richly actionable yet about the wrong thing, or on-topic yet a no-op) and
+ * from completeness (a long, well-formed answer can still be off-task).
+ */
+export interface TaskGroundingResult {
+  /**
+   * Fraction (0-1) of the prompt's distinct salient terms that appear in the
+   * output - the primary grounding signal. Normalized by *prompt* terms (not
+   * output length), so a short on-topic answer is not penalized for brevity.
+   * `NaN` when the prompt had too few salient terms to ground against.
+   */
+  promptCoverage: number;
+  /** Jaccard overlap (0-1) of prompt vs. output salient-term sets (secondary). */
+  jaccard: number;
+  /** The distinct salient prompt terms the check grounds against. */
+  promptTerms: string[];
+  /** Prompt terms that the output echoed (the grounded subset). */
+  matchedTerms: string[];
+  /** Prompt terms entirely absent from the output (the task topics it skipped). */
+  missingTerms: string[];
+  /**
+   * True when the prompt was too thin (fewer than `relevanceMinPromptTerms`
+   * salient terms) to ground anything - the check `skip`s in this case.
+   */
+  promptTooThin: boolean;
+}
+
 // ─── CONSTANTS ──────────────────────────────────────────────────────────────────
 
 const DEFAULT_WORKER = 'ci-run';
 const DEFAULT_MIN_ACTIONABLE_ARTIFACTS = 2;
 const DEFAULT_REPOST_THRESHOLD = 0.9;
 const DEFAULT_TRIVIAL_OUTPUT_CHARS = 80;
+const DEFAULT_MIN_PROMPT_RELEVANCE = 0.25;
+const DEFAULT_RELEVANCE_MIN_PROMPT_TERMS = 4;
+const DEFAULT_RELEVANCE_MIN_OUTPUT_CHARS = 200;
+
+/**
+ * Stopwords removed before computing prompt/output term overlap for the
+ * relevance check. These carry no task identity ("the", "please", "should"), so
+ * counting them would let any fluent English text score as "grounded". Kept
+ * deliberately broad - including review/PR filler ("review", "check", "verify",
+ * "pull", "request", "code", "change") - so coverage is driven by the prompt's
+ * *substantive* nouns (the files, symbols, and concepts it actually names), not
+ * the boilerplate scaffolding every prompt shares.
+ */
+const RELEVANCE_STOPWORDS: ReadonlySet<string> = new Set([
+  // articles / pronouns / conjunctions / prepositions
+  'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have',
+  'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may',
+  'might', 'shall', 'can', 'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by',
+  'from', 'as', 'into', 'this', 'that', 'these', 'those', 'it', 'its', 'and',
+  'or', 'if', 'so', 'than', 'too', 'very', 'just', 'then', 'here', 'there',
+  'all', 'any', 'some', 'your', 'you', 'we', 'our', 'us', 'i', 'me', 'my',
+  'they', 'them', 'their', 'he', 'she', 'his', 'her', 'not', 'no', 'about',
+  'over', 'out', 'up', 'down', 'off', 'each', 'both', 'more', 'most', 'other',
+  'such', 'own', 'same', 'while', 'when', 'where', 'who', 'whom', 'which',
+  'what', 'how', 'why', 'also', 'been', 'were', 'into', 'onto', 'upon',
+  // generic task / review verbs and scaffolding that every prompt shares
+  'please', 'make', 'sure', 'use', 'used', 'using', 'set', 'run', 'review',
+  'check', 'verify', 'ensure', 'flag', 'look', 'looks', 'add', 'added',
+  'change', 'changes', 'changed', 'fix', 'fixed', 'update', 'updated', 'pull',
+  'request', 'pr', 'code', 'implementation', 'implement', 'following', 'any',
+  'new', 'good', 'overall', 'note', 'notes', 'consider', 'need', 'needs',
+]);
 
 /**
  * Phrases that, when they dominate a short output, mark it as a pure
@@ -435,6 +543,192 @@ export function analyzeCiStaleness(options: EvaluateCiRunOptions): StalenessAnal
   };
 }
 
+// ─── RELEVANCE / TASK-GROUNDING (TIER 2) ─────────────────────────────────────────
+
+/**
+ * Tokenize a piece of text into distinct **salient** terms for grounding: lower
+ * case, strip punctuation, split on whitespace, drop short tokens and
+ * {@link RELEVANCE_STOPWORDS}. Returns a de-duplicated set so a term repeated ten
+ * times counts once (coverage is about *which* concepts are touched, not how
+ * often). Pure and deterministic - no stemming beyond a trailing-`s` fold so
+ * "endpoints" grounds "endpoint" and "conditions" grounds "condition".
+ */
+/**
+ * Tokenize a piece of text into distinct **salient** terms for grounding, keyed
+ * by a fold so morphological variants match. Returns a `Map<foldKey, original>`:
+ * the key is a lightly-normalized form (single trailing `-s` stripped for longer
+ * words, so "endpoints" and "endpoint" share a key) used only for *matching*; the
+ * value is the first original surface form seen, used for *display* (so evidence
+ * reads "redis", not the folded "redi"). Lower-cased, punctuation-stripped,
+ * stopwords ({@link RELEVANCE_STOPWORDS}) and short/numeric tokens dropped. A
+ * concept repeated ten times maps to one entry - coverage is about *which*
+ * topics are touched, not how often. Pure and deterministic.
+ */
+function salientTermMap(text: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const raw = (text ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/);
+  for (const tok of raw) {
+    if (tok.length < 3) continue;
+    if (/^\d+$/.test(tok)) continue; // bare numbers carry no topic identity
+    if (RELEVANCE_STOPWORDS.has(tok)) continue;
+    // Fold a single trailing plural -s (longer words only, never -ss) into a
+    // match KEY so "endpoints" grounds "endpoint"; keep the original surface form
+    // for display. The key may look clipped ("redis" -> "redi"); that is fine
+    // because both sides fold identically, and only the original is ever shown.
+    const key = tok.length > 4 && tok.endsWith('s') && !tok.endsWith('ss') ? tok.slice(0, -1) : tok;
+    if (RELEVANCE_STOPWORDS.has(key)) continue;
+    if (!out.has(key)) out.set(key, tok);
+  }
+  return out;
+}
+
+/**
+ * Measure how much of the **prompt's** salient vocabulary the output engages
+ * with. This is the Tier-2 grounding signal: a genuine review of a specific diff
+ * reuses the task's nouns (the files, symbols, and concepts it was asked about),
+ * so it covers most of the prompt's terms; boilerplate posted verbatim instead
+ * of a review (the #1302 mode) covers almost none. The reference point is the
+ * prompt - which the evaluated agent did not write - so it cannot be forged by a
+ * fluent-but-off-task dump.
+ *
+ * `promptCoverage` is normalized by *prompt* terms, not output length, so a short
+ * on-topic answer is not penalized for brevity - only for failing to mention
+ * what was asked. When the prompt is too thin to ground against (fewer than
+ * `minPromptTerms` salient terms), `promptCoverage`/`jaccard` are `NaN` and
+ * `promptTooThin` is set, so the caller can `skip` rather than guess.
+ *
+ * @param prompt - The task the agent was given.
+ * @param output - The agent's output.
+ * @param minPromptTerms - Minimum salient prompt terms required to ground.
+ */
+export function analyzeTaskGrounding(
+  prompt: string,
+  output: string,
+  minPromptTerms = DEFAULT_RELEVANCE_MIN_PROMPT_TERMS,
+): TaskGroundingResult {
+  const promptMap = salientTermMap(prompt);
+  const outputMap = salientTermMap(output);
+  // Display the original surface forms ("redis", not the folded "redi").
+  const promptTerms = [...promptMap.values()];
+
+  if (promptMap.size < minPromptTerms) {
+    return {
+      promptCoverage: Number.NaN,
+      jaccard: Number.NaN,
+      promptTerms,
+      matchedTerms: [],
+      missingTerms: promptTerms,
+      promptTooThin: true,
+    };
+  }
+
+  // Match on the fold KEY so morphological variants align; report the prompt's
+  // original surface form for each bucket.
+  const matchedTerms: string[] = [];
+  const missingTerms: string[] = [];
+  for (const [key, original] of promptMap) {
+    if (outputMap.has(key)) matchedTerms.push(original);
+    else missingTerms.push(original);
+  }
+
+  const promptCoverage = matchedTerms.length / promptMap.size;
+  const unionKeys = new Set([...promptMap.keys(), ...outputMap.keys()]);
+  const jaccard = unionKeys.size === 0 ? 0 : matchedTerms.length / unionKeys.size;
+
+  return {
+    promptCoverage: round4(promptCoverage),
+    jaccard: round4(jaccard),
+    promptTerms,
+    matchedTerms,
+    missingTerms,
+    promptTooThin: false,
+  };
+}
+
+/**
+ * Score the Tier 2 relevance / task-grounding check into a single-run result.
+ * This is the signal completeness and staleness both miss: an output can be
+ * well-formed *and* full of actionable-looking artifacts yet be about the wrong
+ * thing entirely - a project guidance file ("use pnpm", "prefer named exports")
+ * posted verbatim instead of a review of the actual diff. It reads as complete
+ * (long, structured) and even as actionable (it contains file paths, inline
+ * code, and directive words), so only a *reference-aware* check - one that
+ * compares the output against the prompt the agent was given - can catch it.
+ *
+ * Verdict:
+ *   - **skip** if there is no prompt or the prompt is too thin to ground against
+ *     (the check contributes nothing rather than guessing).
+ *   - **fail** if a *substantive* output (>= `minOutputChars`) covers less than
+ *     `minRelevance` of the prompt's salient vocabulary - it ignored the task.
+ *   - **warn** if a *short* output covers less than `minRelevance` (a terse,
+ *     possibly-on-topic answer that names few prompt terms - weak grounding, but
+ *     not the verbose-off-task parroting failure).
+ *   - **pass** otherwise (the output engages with what was asked).
+ *
+ * The score is the prompt-coverage fraction itself (clamped), so it is a smooth
+ * signal usable in a trend rather than a bare boolean.
+ */
+function scoreRelevance(
+  grounding: TaskGroundingResult,
+  output: string,
+  minRelevance: number,
+  minOutputChars: number,
+): CiCheckResult {
+  // No prompt to ground against -> the check abstains (skip, score N/A).
+  if (grounding.promptTooThin || !Number.isFinite(grounding.promptCoverage)) {
+    return {
+      check: 'relevance',
+      tier: 2,
+      score: Number.NaN,
+      status: 'skip',
+      summary: 'no gradable prompt to ground against (prompt too thin)',
+      detail: { promptTerms: grounding.promptTerms.length, skipped: true },
+    };
+  }
+
+  const coverage = grounding.promptCoverage;
+  const substantive = output.trim().length >= minOutputChars;
+  const grounded = coverage >= minRelevance;
+
+  let status: CiCheckStatus;
+  if (grounded) {
+    status = 'pass';
+  } else if (substantive) {
+    // Long output, little overlap with the task = the parroting failure mode.
+    status = 'fail';
+  } else {
+    // Short and weakly grounded: flag softly, don't hard-fail a terse answer.
+    status = 'warn';
+  }
+
+  const pct = (coverage * 100).toFixed(0);
+  const missingPreview = grounding.missingTerms.slice(0, 6).join(', ');
+  const summary =
+    status === 'pass'
+      ? `on-task: covers ${pct}% of the prompt's topics (${grounding.matchedTerms.length}/${grounding.promptTerms.length})`
+      : status === 'fail'
+        ? `off-task: only ${pct}% of the prompt's topics addressed (${grounding.matchedTerms.length}/${grounding.promptTerms.length}); ignores ${missingPreview}`
+        : `weak grounding: short output covers only ${pct}% of the prompt's topics`;
+
+  return {
+    check: 'relevance',
+    tier: 2,
+    score: round4(Math.max(0, Math.min(1, coverage))),
+    status,
+    summary,
+    detail: {
+      promptCoverage: round4(coverage),
+      jaccard: Number.isFinite(grounding.jaccard) ? round4(grounding.jaccard) : 'n/a',
+      matched: grounding.matchedTerms.length,
+      promptTerms: grounding.promptTerms.length,
+      substantive,
+    },
+  };
+}
+
 /**
  * Score the Tier 1 staleness check into a single-run result. This is the no-op
  * detector: a run can pass completeness (non-empty, even substantive) and still
@@ -590,9 +884,15 @@ export function scoreCiRun(
   checks: CiCheckResult[];
   completeness: CompletenessResult;
   staleness: StalenessAnalysis;
+  relevance: TaskGroundingResult;
 } {
   const minActionableArtifacts = options.minActionableArtifacts ?? DEFAULT_MIN_ACTIONABLE_ARTIFACTS;
   const trivialOutputChars = options.trivialOutputChars ?? DEFAULT_TRIVIAL_OUTPUT_CHARS;
+  const minPromptRelevance = options.minPromptRelevance ?? DEFAULT_MIN_PROMPT_RELEVANCE;
+  const relevanceMinPromptTerms =
+    options.relevanceMinPromptTerms ?? DEFAULT_RELEVANCE_MIN_PROMPT_TERMS;
+  const relevanceMinOutputChars =
+    options.relevanceMinOutputChars ?? DEFAULT_RELEVANCE_MIN_OUTPUT_CHARS;
 
   // Tier 1 - structural completeness of the agent's own output.
   const completeness = checkCompleteness(options.output, options.completenessOptions);
@@ -603,12 +903,25 @@ export function scoreCiRun(
   // complete, even substantive, yet still say nothing actionable.
   const staleness = analyzeCiStaleness(options);
 
+  // Tier 2 - relevance / task-grounding: is the output actually about THIS
+  // prompt, or boilerplate that ignored the task? This is the failure neither
+  // completeness nor staleness can see - a verbatim guidance-file dump is
+  // well-formed (passes completeness) and superficially actionable (passes
+  // staleness: it has paths, code, directives), yet shares almost no vocabulary
+  // with the diff it was asked to review (the #1302 mode).
+  const relevance = analyzeTaskGrounding(
+    options.prompt ?? '',
+    options.output,
+    relevanceMinPromptTerms,
+  );
+
   const checks: CiCheckResult[] = [
     scoreCompleteness(completeness),
     scoreStaleness(staleness, options.output, minActionableArtifacts, trivialOutputChars),
+    scoreRelevance(relevance, options.output, minPromptRelevance, relevanceMinOutputChars),
   ];
 
-  return { checks, completeness, staleness };
+  return { checks, completeness, staleness, relevance };
 }
 
 /**
@@ -616,9 +929,11 @@ export function scoreCiRun(
  * same {@link ActionEvaluation} the fleet adapter produces (so it plugs straight
  * into `emitActionResult` / `toActionOutputs` / `renderActionSummary`).
  *
- * Two independent checks run, both Tier 1 (no model-as-judge): structural
- * **completeness** and **staleness** (no-op detection - did it emit anything
- * actionable?).
+ * Three independent checks run, all Tier 1/2 (no model-as-judge): structural
+ * **completeness** (Tier 1), **staleness** (Tier 1 - no-op detection: did it emit
+ * anything actionable?), and **relevance** (Tier 2 - task-grounding: is the
+ * output about THIS prompt, or off-task boilerplate?). The relevance check
+ * `skip`s (and so does not affect the gate) when no gradable prompt is supplied.
  *
  * The run is scored into one synthetic {@link TranscriptScore} and pushed through
  * the same `aggregateScorecard -> evaluateForAction` path the fleet uses: one run
@@ -642,7 +957,7 @@ export function evaluateCiRun(options: EvaluateCiRunOptions): CiRunEvaluation {
   const startedAtMs = now.getTime();
   const runId = startedAt.replace(/[:.]/g, '-');
 
-  const { checks, completeness, staleness } = scoreCiRun(options);
+  const { checks, completeness, staleness, relevance } = scoreCiRun(options);
 
   // Build the synthetic per-transcript score (the roll-up the scorecard expects).
   const checkScores = checks.map((c) =>
@@ -687,7 +1002,7 @@ export function evaluateCiRun(options: EvaluateCiRunOptions): CiRunEvaluation {
   // the gate's `eval_evidence` is self-explanatory without a re-run.
   evaluation.evidence = withCheckReasons(evaluation.evidence, checks, worker);
 
-  return { evaluation, checks, completeness, staleness };
+  return { evaluation, checks, completeness, staleness, relevance };
 }
 
 /**

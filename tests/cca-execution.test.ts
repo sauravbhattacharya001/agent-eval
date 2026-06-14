@@ -249,8 +249,9 @@ describe('extractCcaRunFromFile → evaluateCiRun', () => {
       now: FIXED_NOW,
     });
     expect(evaluation.passed).toBe(true);
-    // Both checks present and none failing.
-    expect(checks).toHaveLength(2);
+    // All three checks present (completeness, staleness, relevance) and none failing.
+    expect(checks).toHaveLength(3);
+    expect(checks.map((c) => c.check).sort()).toEqual(['completeness', 'relevance', 'staleness']);
     expect(checks.every((c) => c.status !== 'fail')).toBe(true);
     // The evaluation is the standard ActionEvaluation shape (drops into emit /
     // toActionOutputs unchanged).

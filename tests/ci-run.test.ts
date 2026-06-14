@@ -22,6 +22,7 @@ import {
   scoreCiRun,
   analyzeActionability,
   analyzeCiStaleness,
+  analyzeTaskGrounding,
 } from '../src/action/ci-run.js';
 import { toActionOutputs } from '../src/action/adapter.js';
 import {
@@ -310,6 +311,164 @@ describe('analyzeActionability - concrete artifact detection', () => {
   });
 });
 
+// ─── scoreCiRun - relevance / task-grounding check (Tier 2) ───────────────────
+
+describe('scoreCiRun - relevance / task-grounding (Tier 2)', () => {
+  it('passes a review that engages with the prompt topics', () => {
+    const { checks, relevance } = scoreCiRun({ prompt: REVIEW_PROMPT, output: GOOD_REVIEW });
+    const c = checks.find((x) => x.check === 'relevance');
+    expect(c?.tier).toBe(2);
+    expect(c?.status).toBe('pass');
+    // GOOD_REVIEW names the rate limiter, token bucket, Redis, race, login - it
+    // covers a large fraction of the prompt's salient terms.
+    expect(relevance.promptCoverage).toBeGreaterThan(0.5);
+    expect(c?.summary.toLowerCase()).toContain('on-task');
+  });
+
+  it('FAILS substantive boilerplate that ignores the prompt (the #1302 parrot)', () => {
+    // BOILERPLATE_OUTPUT is a Contributing-Guidelines file posted verbatim: it is
+    // long and structured (completeness passes) and littered with paths, inline
+    // code, and directives (staleness passes), but it is about pnpm/ESLint/PRs,
+    // NOT the rate-limiting diff. Only the reference-aware relevance check sees
+    // it. This is the headline false-negative this check exists to close.
+    const { checks, completeness } = scoreCiRun({
+      prompt: REVIEW_PROMPT,
+      output: BOILERPLATE_OUTPUT,
+    });
+    const rel = checks.find((x) => x.check === 'relevance');
+    const stale = checks.find((x) => x.check === 'staleness');
+    // Completeness is fooled (it is non-empty and substantive).
+    expect(completeness.violations.filter((v) => v.severity === 'error')).toHaveLength(0);
+    // Staleness is fooled (the boilerplate contains actionable-looking artifacts).
+    expect(stale?.status).not.toBe('fail');
+    // Relevance is NOT fooled: it shares almost no vocabulary with the prompt.
+    expect(rel?.status).toBe('fail');
+    expect(rel?.summary.toLowerCase()).toContain('off-task');
+    expect(rel?.score).toBeLessThan(0.25);
+  });
+
+  it('does NOT fail an on-topic no-op on relevance (staleness owns that)', () => {
+    // NOOP_ONTOPIC names every prompt topic (rate limiting, token bucket, Redis,
+    // login, concurrent) but says nothing actionable. Relevance must PASS (it is
+    // about the right thing); staleness is what catches the no-op. The two
+    // signals are orthogonal - relevance is "about THIS task?", staleness is
+    // "anything to act on?".
+    const { checks, relevance } = scoreCiRun({ prompt: REVIEW_PROMPT, output: NOOP_ONTOPIC });
+    const rel = checks.find((x) => x.check === 'relevance');
+    const stale = checks.find((x) => x.check === 'staleness');
+    expect(rel?.status).toBe('pass');
+    expect(relevance.promptCoverage).toBeGreaterThan(0.25);
+    // Staleness still fails it - the no-op is caught, just not by relevance.
+    expect(stale?.status).toBe('fail');
+  });
+
+  it('warns (not fails) a short, weakly-grounded answer', () => {
+    // A terse answer that names few prompt terms is weak grounding, but a short
+    // answer legitimately may - the verbose-off-task parroting mode is what we
+    // hard-fail. Below relevanceMinOutputChars, low coverage is a warn.
+    const short = 'Looks fine to me overall.';
+    const { checks } = scoreCiRun({ prompt: REVIEW_PROMPT, output: short });
+    const rel = checks.find((x) => x.check === 'relevance');
+    expect(rel?.status).toBe('warn');
+    expect(rel?.summary.toLowerCase()).toContain('weak grounding');
+  });
+
+  it('SKIPS relevance when there is no gradable prompt', () => {
+    // With no prompt (or a one-word prompt) there is nothing to ground against,
+    // so the check abstains rather than guessing - it must not affect the gate.
+    const { checks } = scoreCiRun({ prompt: '', output: GOOD_REVIEW });
+    const rel = checks.find((x) => x.check === 'relevance');
+    expect(rel?.status).toBe('skip');
+    expect(Number.isNaN(rel?.score ?? 0)).toBe(true);
+    expect(rel?.detail?.skipped).toBe(true);
+  });
+
+  it('SKIPS relevance for a prompt with too few salient terms', () => {
+    const { checks } = scoreCiRun({ prompt: 'review the PR', output: GOOD_REVIEW });
+    const rel = checks.find((x) => x.check === 'relevance');
+    // "review", "the", "pr" are all stopwords -> zero salient terms -> skip.
+    expect(rel?.status).toBe('skip');
+  });
+
+  it('lets minPromptRelevance tune the bar', () => {
+    // GOOD_REVIEW covers ~0.76; a 0.9 floor should fail it, a 0.1 floor pass it.
+    const strict = scoreCiRun({
+      prompt: REVIEW_PROMPT,
+      output: GOOD_REVIEW,
+      minPromptRelevance: 0.9,
+    }).checks.find((c) => c.check === 'relevance');
+    expect(strict?.status).toBe('fail');
+
+    const lax = scoreCiRun({
+      prompt: REVIEW_PROMPT,
+      output: BOILERPLATE_OUTPUT,
+      minPromptRelevance: 0.0,
+    }).checks.find((c) => c.check === 'relevance');
+    // A zero floor grounds anything (coverage >= 0 always).
+    expect(lax?.status).toBe('pass');
+  });
+
+  it('grades the relevance score by coverage (on-task > off-task)', () => {
+    const good = scoreCiRun({ prompt: REVIEW_PROMPT, output: GOOD_REVIEW }).checks.find(
+      (c) => c.check === 'relevance',
+    );
+    const off = scoreCiRun({ prompt: REVIEW_PROMPT, output: BOILERPLATE_OUTPUT }).checks.find(
+      (c) => c.check === 'relevance',
+    );
+    expect(good?.score).toBeGreaterThan(off?.score ?? 1);
+  });
+});
+
+// ─── analyzeTaskGrounding - unit tests ───────────────────────────────────────
+
+describe('analyzeTaskGrounding - prompt/output term overlap', () => {
+  it('reports high coverage when the output reuses the prompt vocabulary', () => {
+    const g = analyzeTaskGrounding(REVIEW_PROMPT, GOOD_REVIEW);
+    expect(g.promptTooThin).toBe(false);
+    expect(g.promptCoverage).toBeGreaterThan(0.5);
+    expect(g.matchedTerms).toContain('token');
+    expect(g.matchedTerms).toContain('redis');
+  });
+
+  it('reports near-zero coverage for off-task boilerplate', () => {
+    const g = analyzeTaskGrounding(REVIEW_PROMPT, BOILERPLATE_OUTPUT);
+    expect(g.promptCoverage).toBeLessThan(0.25);
+    // The task topics it skipped are surfaced for the evidence line.
+    expect(g.missingTerms.length).toBeGreaterThan(0);
+  });
+
+  it('folds simple plurals so "endpoints" grounds "endpoint"', () => {
+    // minPromptTerms lowered to exercise the fold mechanics on a short prompt.
+    const g = analyzeTaskGrounding(
+      'Check the login endpoint behavior',
+      'I reviewed the endpoints.',
+      1,
+    );
+    expect(g.matchedTerms).toContain('endpoint');
+  });
+
+  it('ignores stopwords and generic review scaffolding', () => {
+    // A prompt of pure scaffolding has no salient terms to ground against.
+    const g = analyzeTaskGrounding('Please review and check the pull request code', GOOD_REVIEW);
+    expect(g.promptTooThin).toBe(true);
+    expect(Number.isNaN(g.promptCoverage)).toBe(true);
+  });
+
+  it('de-duplicates terms (coverage is about concepts, not counts)', () => {
+    // minPromptTerms lowered: 3 distinct prompt terms is below the production
+    // floor (4) but is exactly what this de-dup unit test needs to exercise.
+    const g = analyzeTaskGrounding('redis redis redis cache expiry', 'the redis cache sets expiry', 1);
+    // "redis" counts once toward the 3 distinct prompt terms (redis, cache, expiry).
+    expect(g.promptTerms.sort()).toEqual(['cache', 'expiry', 'redis']);
+    expect(g.promptCoverage).toBe(1);
+  });
+
+  it('is symmetric-safe and total on empty inputs', () => {
+    expect(analyzeTaskGrounding('', '').promptTooThin).toBe(true);
+    expect(analyzeTaskGrounding(REVIEW_PROMPT, '').promptCoverage).toBe(0);
+  });
+});
+
 // ─── analyzeCiStaleness - combined analysis ────────────────────────────────
 
 describe('analyzeCiStaleness - combined no-op analysis', () => {
@@ -355,9 +514,10 @@ describe('evaluateCiRun - end to end', () => {
     expect(card.workers[0]?.runs).toBe(1);
     expect(card.totals.runs).toBe(1);
 
-    // Both surviving checks present in the verdict path.
+    // All three surviving checks present in the verdict path.
     expect(result.checks.map((c) => c.check).sort()).toEqual([
       'completeness',
+      'relevance',
       'staleness',
     ]);
   });
@@ -476,7 +636,7 @@ describe('evaluateCiRun - end to end', () => {
     expect(relaxed.evaluation.passed).toBe(true);
   });
 
-  it('exposes the raw completeness and staleness analyses', () => {
+  it('exposes the raw completeness, staleness, and relevance analyses', () => {
     const result = evaluateCiRun({
       prompt: REVIEW_PROMPT,
       output: BOILERPLATE_OUTPUT,
@@ -488,6 +648,32 @@ describe('evaluateCiRun - end to end', () => {
     expect(typeof result.staleness.artifacts.count).toBe('number');
     expect(Array.isArray(result.staleness.abandonment)).toBe(true);
     expect(typeof result.staleness.isRepost).toBe('boolean');
+    // The raw task-grounding analysis is exposed (coverage + matched/missing).
+    expect(result.relevance).toBeDefined();
+    expect(typeof result.relevance.promptCoverage).toBe('number');
+    expect(Array.isArray(result.relevance.missingTerms)).toBe(true);
+  });
+
+  it('FAILS verbatim boilerplate on relevance even though completeness+staleness pass (#1302)', () => {
+    // The end-to-end proof of the #1302 fix: a guidance file posted instead of a
+    // review passes the structural checks but trips the gate on relevance alone.
+    const result = evaluateCiRun({
+      prompt: REVIEW_PROMPT,
+      output: BOILERPLATE_OUTPUT,
+      worker: 'claude-review',
+      now: FIXED_NOW,
+    });
+    expect(result.evaluation.passed).toBe(false);
+    expect(result.evaluation.exitCode).toBe(1);
+    const rel = result.checks.find((c) => c.check === 'relevance');
+    const others = result.checks.filter((c) => c.check !== 'relevance');
+    expect(rel?.status).toBe('fail');
+    // Relevance is the sole failing check - the structural checks were fooled.
+    expect(others.every((c) => c.status !== 'fail')).toBe(true);
+    // The reason reaches eval_evidence so a maintainer sees WHY without a re-run.
+    expect(toActionOutputs(result.evaluation).eval_evidence).toContain(
+      'claude-review/relevance:',
+    );
   });
 
   it('is deterministic - same inputs produce the same verdict and score', () => {
@@ -624,5 +810,6 @@ describe('package root re-exports the CI run evaluator', () => {
     expect(typeof mod.scoreCiRun).toBe('function');
     expect(typeof mod.analyzeActionability).toBe('function');
     expect(typeof mod.analyzeCiStaleness).toBe('function');
+    expect(typeof mod.analyzeTaskGrounding).toBe('function');
   });
 });

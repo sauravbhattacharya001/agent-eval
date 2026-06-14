@@ -57,6 +57,7 @@ export {
   evaluateCiRun,
   analyzeActionability,
   analyzeCiStaleness,
+  analyzeTaskGrounding,
 } from './ci-run.js';
 
 export type {
@@ -66,6 +67,7 @@ export type {
   CiRunEvaluation,
   ActionableArtifacts,
   StalenessAnalysis,
+  TaskGroundingResult,
 } from './ci-run.js';
 
 export {

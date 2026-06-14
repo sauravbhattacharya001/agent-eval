@@ -48,11 +48,16 @@ export type ScoreTier = 1 | 2;
 /** Pass/fail/marginal verdict for a single check. */
 export type ScoreStatus = 'pass' | 'fail' | 'warn' | 'skip';
 
-/** Canonical check identifiers the historical scorer emits. */
+/**
+ * Canonical check identifiers the historical scorer emits. `relevance` is a
+ * Tier-2 task-grounding signal produced by the single-run CI evaluator
+ * ({@link ../action/ci-run}); the fleet transcript scorer emits the other three.
+ */
 export type CheckName =
   | 'staleness'
   | 'completeness'
-  | 'verification';
+  | 'verification'
+  | 'relevance';
 
 /**
  * One scored check for one transcript. This is the atomic row written to

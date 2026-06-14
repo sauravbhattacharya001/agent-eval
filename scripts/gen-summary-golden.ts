@@ -111,6 +111,22 @@ const SCENARIOS: readonly Scenario[] = [
       'still passes — but **staleness** flags the absent actionable output, the ' +
       'gate fails, and the step exits `1`.',
   },
+  {
+    fixture: 'verbatim-claudemd',
+    heading: 'Failing run — guidance file pasted instead of a review',
+    blurb:
+      'The hardest false-negative: the agent read `CLAUDE.md` and posted the ' +
+      'project guidelines back verbatim — "use pnpm", "prefer named exports", ' +
+      'commit conventions — instead of reviewing the rate-limiting diff. It is ' +
+      'long and well-structured, so **completeness** passes, and it is littered ' +
+      'with file paths, inline code, and directive words, so **staleness** sees ' +
+      'plenty of actionable-looking artifacts and also passes. Only a ' +
+      'reference-aware check catches it: **relevance** compares the output ' +
+      'against the prompt the agent was given and finds it shares almost none of ' +
+      "the task's vocabulary (nothing about rate limiting, the token bucket, " +
+      'Redis expiry, or race conditions). The gate fails on relevance alone, and ' +
+      'the **Findings** section says *why* — the topics the output ignored.',
+  },
 ];
 
 /**

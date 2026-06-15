@@ -6,7 +6,6 @@ import type {
   Assertion,
   AssertionResult,
   EvalContext,
-  EvalProvider,
   EvalSpec,
   EvalSuiteDefinition,
   Reporter,
@@ -259,15 +258,4 @@ export async function runSuites(
     results.push(await runSuite(suite, options));
   }
   return results;
-}
-
-/**
- * Helper to resolve a provider — currently only supports direct instances.
- * Future: add provider registry for string lookups.
- */
-export function resolveProvider(provider: EvalProvider | string): EvalProvider {
-  if (typeof provider === 'string') {
-    throw new Error(`Provider registry not yet implemented. Pass an EvalProvider instance.`);
-  }
-  return provider;
 }

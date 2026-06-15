@@ -8,7 +8,6 @@
 export {
   runSuite,
   runSuites,
-  resolveProvider,
 } from './core/runner.js';
 export type { RunnerOptions } from './core/runner.js';
 
@@ -335,7 +334,6 @@ export {
   extractTitle,
   extractSections,
   extractListItems,
-  extractReferences as extractTranscriptReferences,
   slugifyHeading,
   discoverTranscripts,
   loadTranscript,

@@ -10,7 +10,7 @@ Three ways to use it:
 
 ## Features
 
-- 🤖 **Live agent evaluation** - run agents against real LLMs, capture tool calls, evaluate output
+- **Live agent evaluation** - run agents against real LLMs, capture tool calls, evaluate output
 - 🔺 **3-tier eval pyramid** - deterministic → heuristic → model-as-judge, auto short-circuit
 - ⚖️ **LLM-as-judge** - structured rubrics, calibration, consensus & adversarial judging
 - 🔍 **Hallucination detection** - flag fabricated facts, broken links, invented references
@@ -113,7 +113,7 @@ const tieredResult = await runTiered(result.output, [
   tier2(toContainKeywords(['hashing', 'bcrypt', 'salt'])),
   tier2(toNotRepeat()),
   tier2(toNotBeStale(result.timeline)),
-  // Tier 3 - Model-as-Judge ($$$, seconds)
+  // Tier 3 - Model-as-Judge (paid, seconds)
   tier3(toPassJudge(judge, BUILTIN_RUBRICS.codeReview())),
 ]);
 
@@ -133,7 +133,7 @@ result.durationMs;    // Total wall-clock time
 
 ## Tiered Runner (Cost Pyramid)
 
-Run assertions in tier order with automatic short-circuiting. If Tier 1 fails, Tier 2+3 never run - saving time and money.
+Run assertions in tier order with automatic short-circuiting. If Tier 1 fails, Tier 2+3 never run - saving time and cost.
 
 ```typescript
 import { runTiered, tier1, tier2, tier3 } from 'agent-eval';
@@ -145,7 +145,7 @@ const result = await runTiered(output, [
   tier3(toPassJudge(backend, rubric)),
 ]);
 
-if (!result.passed) console.log(`Caught at Tier ${result.failedAtTier} - saved $$$`);
+if (!result.passed) console.log(`Caught at Tier ${result.failedAtTier} - later tiers skipped`);
 ```
 
 | Option | Default | Description |
@@ -267,10 +267,15 @@ toPassAdversarialJudge(backend, rubric)                // weakness-first, anti-i
 ## CLI
 
 ```bash
-npx agent-eval run ./specs/
+npx agent-eval run ./specs/                     # run eval specs (*.eval.ts / *.eval.js)
+npx agent-eval run ./specs/ --bail --filter "hallucination"
+npx agent-eval validate ./transcripts/          # validate transcript(s) against the contract
+npx agent-eval validate ./run.md --finished     # require a FINISHED transcript
 npx agent-eval --version
 npx agent-eval --help
 ```
+
+`run` options: `--bail/-b`, `--filter/-f <regex>`, `--reporter/-r terminal|json`, `--timeout/-t <ms>` (default 30000), `--concurrency/-c <n>` (default 1). `validate` options: `--json`, `--finished`.
 
 ## Fleet Monitoring
 
@@ -385,23 +390,23 @@ See the runnable examples in [`examples/`](examples/): `ci-eval.ts`, `ci-single-
 
 ## Benchmark
 
-10 adversarial scenarios (64 assertions, all 3 tiers) against 5 models via Groq - **no model scored above 63%**:
+The `mega-adversarial.ts` example runs 10 adversarial scenarios (all 3 tiers) against 5 models via Groq. Example results from one run:
 
 | Rank | Model | Score | Passed |
 |------|-------|-------|--------|
-| 🥇 | **Llama 3.3 70B** | **62.5%** | 40/64 |
-| 🥈 | **GPT-OSS 120B** | **51.6%** | 33/64 |
-| 🥉 | **Qwen3 32B** | **48.4%** | 31/64 |
-| 4 | **Llama 4 Scout 17B** | **46.9%** | 30/64 |
-| 5 | **Llama 3.1 8B** | **34.4%** | 22/64 |
+| 1 | Llama 3.3 70B | 62.5% | 40/64 |
+| 2 | GPT-OSS 120B | 51.6% | 33/64 |
+| 3 | Qwen3 32B | 48.4% | 31/64 |
+| 4 | Llama 4 Scout 17B | 46.9% | 30/64 |
+| 5 | Llama 3.1 8B | 34.4% | 22/64 |
 
-Three universal failure modes: **sycophancy** (praised bad code when told "my CTO loves it"), **anchoring bias** (deferred to a wrong expert instead of reading the code), and **multi-step reasoning** (couldn't trace a 5-file dependency chain).
+The scenarios target recurring failure modes including sycophancy (praising bad code when told "my CTO loves it"), anchoring bias (deferring to a wrong expert instead of reading the code), and multi-step reasoning (tracing a 5-file dependency chain).
 
 ```bash
 GROQ_API_KEY=your-key npx tsx examples/mega-adversarial.ts
 ```
 
-Full writeup: [I Built an Adversarial Eval Framework and Attacked 5 LLMs](https://dev.to/saurav_bhattacharya/i-built-an-adversarial-eval-framework-and-attacked-5-llms-every-single-one-failed-1j81).
+Scores will vary by model, prompt, and run.
 
 ## License
 

@@ -12,292 +12,52 @@
  *
  * All checks are deterministic — pure pattern/keyword matching with no AI.
  *
+ * This file is the **public barrel** for constraint checking and the home of
+ * the assertion factories that wrap the engine into Jest/Vitest-style
+ * assertions. The supporting seams live alongside it and are re-exported here
+ * so the public surface stays a single `./constraints.js` import path:
+ * - ./constraints-types.js    - the type vocabulary (rule/coverage/violation model)
+ * - ./constraints-analysis.js - the deterministic engine (validateRule /
+ *                               validateConstraints / calculateKeywordCoverage)
+ *
  * @tier 1 — Deterministic (no AI needed, 100% reliable)
  * @module
  */
 
 import type { Assertion, AssertionResult } from '../core/types.js';
+import type {
+  ConstraintRule,
+  ConstraintValidationOptions,
+  KeywordCoverageOptions,
+} from './constraints-types.js';
+import {
+  calculateKeywordCoverage,
+  validateConstraints,
+} from './constraints-analysis.js';
 
-// ─── TYPES ──────────────────────────────────────────────────────────────────────
+// --- TYPE RE-EXPORTS -----------------------------------------------------------
+// The constraint type vocabulary lives in ./constraints-types.js; re-export it
+// here so consumers keep a single `./constraints.js` import path.
+export type {
+  ConstraintRule,
+  ConstraintValidationOptions,
+  ConstraintValidationResult,
+  ConstraintViolation,
+  KeywordCoverageOptions,
+  KeywordCoverageResult,
+  ViolationLocation,
+} from './constraints-types.js';
 
-/** A single constraint rule that output must satisfy. */
-export interface ConstraintRule {
-  /** Type of constraint check. */
-  kind: 'required' | 'forbidden';
-  /** Type of matching to perform. */
-  match: 'keyword' | 'regex' | 'phrase';
-  /** The pattern, keyword, or phrase. For regex, provide a string that will be compiled. */
-  value: string | RegExp;
-  /** Case-sensitive matching (default: false for keyword/phrase, respected for regex flags). */
-  caseSensitive?: boolean;
-  /** Human-readable description of why this constraint exists. */
-  reason?: string;
-  /** Severity when violated: 'error' (fail) or 'warning'. Default: 'error'. */
-  severity?: 'error' | 'warning';
-}
+// --- ENGINE RE-EXPORTS ---------------------------------------------------------
+// The deterministic engine (rule compilation + validation + coverage) lives
+// alongside; re-export the public functions so the barrel is the single surface.
+export {
+  calculateKeywordCoverage,
+  validateConstraints,
+  validateRule,
+} from './constraints-analysis.js';
 
-/** Options for keyword coverage scoring. */
-export interface KeywordCoverageOptions {
-  /** List of expected keywords/phrases. */
-  keywords: string[];
-  /** Minimum coverage ratio to pass (0–1). Default: 0.8 (80%). */
-  minCoverage?: number;
-  /** Whether matching is case-sensitive. Default: false. */
-  caseSensitive?: boolean;
-  /** Whether to match whole words only. Default: false. */
-  wholeWord?: boolean;
-}
-
-/** Result of a keyword coverage analysis. */
-export interface KeywordCoverageResult {
-  /** Coverage ratio (0–1). */
-  coverage: number;
-  /** Number of keywords found. */
-  found: number;
-  /** Total keywords expected. */
-  total: number;
-  /** List of keywords that were found. */
-  present: string[];
-  /** List of keywords that are missing. */
-  missing: string[];
-}
-
-/** A constraint violation found during validation. */
-export interface ConstraintViolation {
-  /** The rule that was violated. */
-  rule: ConstraintRule;
-  /** Description of the violation. */
-  message: string;
-  /** Severity: error = assertion fails, warning = passes with note. */
-  severity: 'error' | 'warning';
-  /** Location context (line numbers, positions) if available. */
-  location?: ViolationLocation;
-}
-
-/** Location details for a constraint violation. */
-export interface ViolationLocation {
-  /** Line number (1-indexed) where the violation was found. */
-  line?: number;
-  /** Column (0-indexed) where the match starts. */
-  column?: number;
-  /** The matched text. */
-  matched?: string;
-}
-
-/** Options for constraint validation. */
-export interface ConstraintValidationOptions {
-  /** List of constraint rules to check. */
-  rules: ConstraintRule[];
-  /** Whether to fail on first violation or collect all. Default: false (collect all). */
-  failFast?: boolean;
-}
-
-/** Result of constraint validation. */
-export interface ConstraintValidationResult {
-  /** Whether all constraints passed (no error-severity violations). */
-  valid: boolean;
-  /** All violations found. */
-  violations: ConstraintViolation[];
-  /** Number of rules that passed. */
-  passed: number;
-  /** Number of rules that failed (error severity). */
-  failed: number;
-  /** Number of rules with warnings. */
-  warnings: number;
-  /** Total rules checked. */
-  total: number;
-}
-
-// ─── CONSTRAINT HELPERS ─────────────────────────────────────────────────────────
-
-/**
- * Convert a ConstraintRule value into a usable RegExp for matching.
- */
-function ruleToRegExp(rule: ConstraintRule): RegExp {
-  const caseSensitive = rule.caseSensitive ?? false;
-
-  if (rule.value instanceof RegExp) {
-    // Use the regex as-is but respect caseSensitive override
-    if (caseSensitive) {
-      return rule.value;
-    }
-    // Rebuild without 'i' flag to honor caseSensitive=false (add 'i')
-    const flags = rule.value.flags.includes('i') ? rule.value.flags : rule.value.flags + 'i';
-    return new RegExp(rule.value.source, flags);
-  }
-
-  const value = rule.value;
-  const flags = caseSensitive ? 'g' : 'gi';
-
-  if (rule.match === 'regex') {
-    return new RegExp(value, flags);
-  }
-
-  // For keyword/phrase matching, escape regex special characters
-  const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-  if (rule.match === 'keyword') {
-    // Word boundary matching for keywords.
-    // If the keyword starts/ends with non-word characters (e.g. "C++"),
-    // we can't use \b at that boundary — use lookahead/lookbehind instead.
-    const startsWithWord = /^\w/.test(escaped);
-    const endsWithWord = /\w$/.test(escaped);
-    const prefix = startsWithWord ? '\\b' : '(?<![\\w])';
-    const suffix = endsWithWord ? '\\b' : '(?![\\w])';
-    return new RegExp(`${prefix}${escaped}${suffix}`, flags);
-  }
-
-  // Phrase: exact substring matching (no word boundaries required)
-  return new RegExp(escaped, flags);
-}
-
-/**
- * Find the location of a match in text.
- */
-function findMatchLocation(text: string, pattern: RegExp): ViolationLocation | undefined {
-  const match = pattern.exec(text);
-  if (!match) return undefined;
-
-  const beforeMatch = text.slice(0, match.index);
-  const line = (beforeMatch.match(/\n/g) || []).length + 1;
-  const lastNewline = beforeMatch.lastIndexOf('\n');
-  const column = lastNewline === -1 ? match.index : match.index - lastNewline - 1;
-
-  return {
-    line,
-    column,
-    matched: match[0],
-  };
-}
-
-// ─── VALIDATION FUNCTIONS ───────────────────────────────────────────────────────
-
-/**
- * Validate a single constraint rule against output text.
- */
-export function validateRule(output: string, rule: ConstraintRule): ConstraintViolation | null {
-  const pattern = ruleToRegExp(rule);
-  const isPresent = pattern.test(output);
-
-  // Reset lastIndex for global regexes
-  pattern.lastIndex = 0;
-
-  const severity = rule.severity ?? 'error';
-
-  if (rule.kind === 'required' && !isPresent) {
-    const valueStr = rule.value instanceof RegExp ? rule.value.toString() : `"${rule.value}"`;
-    return {
-      rule,
-      message: rule.reason
-        ? `Missing required ${rule.match}: ${valueStr} — ${rule.reason}`
-        : `Missing required ${rule.match}: ${valueStr}`,
-      severity,
-    };
-  }
-
-  if (rule.kind === 'forbidden' && isPresent) {
-    const valueStr = rule.value instanceof RegExp ? rule.value.toString() : `"${rule.value}"`;
-    const location = findMatchLocation(output, pattern);
-    return {
-      rule,
-      message: rule.reason
-        ? `Found forbidden ${rule.match}: ${valueStr} — ${rule.reason}`
-        : `Found forbidden ${rule.match}: ${valueStr}`,
-      severity,
-      location,
-    };
-  }
-
-  return null;
-}
-
-/**
- * Validate output against a full set of constraint rules.
- */
-export function validateConstraints(
-  output: string,
-  options: ConstraintValidationOptions,
-): ConstraintValidationResult {
-  const violations: ConstraintViolation[] = [];
-  let passed = 0;
-  let failed = 0;
-  let warnings = 0;
-
-  for (const rule of options.rules) {
-    const violation = validateRule(output, rule);
-
-    if (violation === null) {
-      passed++;
-    } else {
-      violations.push(violation);
-      if (violation.severity === 'error') {
-        failed++;
-        if (options.failFast) {
-          return {
-            valid: false,
-            violations,
-            passed,
-            failed,
-            warnings,
-            total: options.rules.length,
-          };
-        }
-      } else {
-        warnings++;
-      }
-    }
-  }
-
-  return {
-    valid: failed === 0,
-    violations,
-    passed,
-    failed,
-    warnings,
-    total: options.rules.length,
-  };
-}
-
-/**
- * Calculate keyword coverage — what percentage of expected keywords appear in output.
- */
-export function calculateKeywordCoverage(
-  output: string,
-  options: KeywordCoverageOptions,
-): KeywordCoverageResult {
-  const { keywords, caseSensitive = false, wholeWord = false } = options;
-  const present: string[] = [];
-  const missing: string[] = [];
-
-  const normalizedOutput = caseSensitive ? output : output.toLowerCase();
-
-  for (const keyword of keywords) {
-    const normalizedKeyword = caseSensitive ? keyword : keyword.toLowerCase();
-    let found: boolean;
-
-    if (wholeWord) {
-      const escaped = normalizedKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const flags = caseSensitive ? '' : 'i';
-      const pattern = new RegExp(`\\b${escaped}\\b`, flags);
-      found = pattern.test(output);
-    } else {
-      found = normalizedOutput.includes(normalizedKeyword);
-    }
-
-    if (found) {
-      present.push(keyword);
-    } else {
-      missing.push(keyword);
-    }
-  }
-
-  const total = keywords.length;
-  const coverage = total === 0 ? 1 : present.length / total;
-
-  return { coverage, found: present.length, total, present, missing };
-}
-
-// ─── ASSERTION FACTORIES ────────────────────────────────────────────────────────
+// --- ASSERTION FACTORIES -------------------------------------------------------
 
 /**
  * Assert that output contains all required keywords.

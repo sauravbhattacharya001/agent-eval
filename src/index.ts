@@ -373,6 +373,9 @@ export {
   validateParsedTranscript,
   TRANSCRIPT_CONTRACT_V1,
   CONTRACT_OUTCOME_TOKENS,
+  labelField,
+  provenanceMap,
+  ingestTrace,
 } from './monitoring/index.js';
 export type {
   Transcript,
@@ -424,6 +427,13 @@ export type {
   ContractValidationResult,
   ContractSection,
   ViolationSeverity,
+  Provenance,
+  ProvenanceRecord,
+  TraceProvenance,
+  TraceSession,
+  TraceEvent,
+  TraceToolCall,
+  TraceDecision,
 } from './monitoring/index.js';
 
 // GitHub Action Integration (Phase 4 — CI quality gate)

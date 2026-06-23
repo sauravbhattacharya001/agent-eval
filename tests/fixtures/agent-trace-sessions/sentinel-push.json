@@ -1,0 +1,77 @@
+{
+  "session_id": "sess-sentinel-001",
+  "agent_name": "claude-sonnet@winsentinel-harness",
+  "started_at": "2026-06-23T10:00:00.000Z",
+  "ended_at": "2026-06-23T10:00:12.500Z",
+  "status": "completed",
+  "total_tokens_in": 3400,
+  "total_tokens_out": 880,
+  "metadata": { "task": "score the host and push if green", "harness_version": "1.4.0" },
+  "events": [
+    {
+      "event_id": "evt-1",
+      "session_id": "sess-sentinel-001",
+      "event_type": "llm_call",
+      "timestamp": "2026-06-23T10:00:01.000Z",
+      "model": "claude-sonnet-4",
+      "tokens_in": 1200,
+      "tokens_out": 180,
+      "duration_ms": 1400,
+      "input_data": { "prompt": "Review the rate limiter and decide whether to push." },
+      "output_data": { "text": "I'll inspect the limiter, run the score, then push if it is green." }
+    },
+    {
+      "event_id": "evt-2",
+      "session_id": "sess-sentinel-001",
+      "event_type": "decision",
+      "timestamp": "2026-06-23T10:00:02.000Z",
+      "decision_trace": {
+        "trace_id": "dt-1",
+        "step": 1,
+        "reasoning": "The score command is the unforgeable gate, so run it before any push.",
+        "alternatives_considered": ["push immediately", "skip scoring"],
+        "confidence": 0.82
+      }
+    },
+    {
+      "event_id": "evt-3",
+      "session_id": "sess-sentinel-001",
+      "event_type": "tool_call",
+      "timestamp": "2026-06-23T10:00:03.000Z",
+      "duration_ms": 5200,
+      "tool_call": {
+        "tool_call_id": "tc-1",
+        "tool_name": "run_command",
+        "tool_input": { "command": "winsentinel --score" },
+        "tool_output": { "exit_code": 0, "is_error": false, "stdout": "score=0.94 PASS" },
+        "timestamp": "2026-06-23T10:00:03.050Z",
+        "duration_ms": 5180
+      }
+    },
+    {
+      "event_id": "evt-4",
+      "session_id": "sess-sentinel-001",
+      "event_type": "tool_call",
+      "timestamp": "2026-06-23T10:00:09.000Z",
+      "duration_ms": 800,
+      "tool_call": {
+        "tool_call_id": "tc-2",
+        "tool_name": "git_push",
+        "tool_input": { "branch": "main" },
+        "tool_output": { "exit_code": 0, "is_error": false, "stdout": "pushed 1 commit" },
+        "duration_ms": 760
+      }
+    },
+    {
+      "event_id": "evt-5",
+      "session_id": "sess-sentinel-001",
+      "event_type": "llm_call",
+      "timestamp": "2026-06-23T10:00:11.000Z",
+      "model": "claude-sonnet-4",
+      "tokens_in": 1000,
+      "tokens_out": 520,
+      "duration_ms": 1100,
+      "output_data": { "text": "Score was 0.94 (green) so I pushed the commit to main. Done." }
+    }
+  ]
+}

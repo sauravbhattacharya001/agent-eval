@@ -168,3 +168,20 @@ export type {
   ContractSection,
   ViolationSeverity,
 } from './contract.js';
+
+// ─── Trace Provenance (Section F, slice 1) ────────────────────────
+//
+// Read-only CLAIM↔PROOF labeling for agent execution traces — the Tier 1+2
+// foundation for harness×model selection. Static, content-blind, pure.
+
+export { labelField, provenanceMap, ingestTrace } from './trace-provenance.js';
+
+export type {
+  Provenance,
+  ProvenanceRecord,
+  TraceProvenance,
+  TraceSession,
+  TraceEvent,
+  TraceToolCall,
+  TraceDecision,
+} from './trace-provenance.js';

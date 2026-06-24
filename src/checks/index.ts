@@ -392,3 +392,20 @@ export type {
   FootprintResult,
   ToolOutcome,
 } from './trace-footprint.js';
+
+export {
+  // Claim↔proof cross-check (Section F, slice 3 — Tier 1+2, PROOF only)
+  crossCheckClaims,
+  // Proof-anchored predicates
+  toHaveNoContradictedClaims,
+  toHaveClaimIntegrityAtLeast,
+  toHaveInstrumentationGapsAtMost,
+} from './trace-claim-check.js';
+
+export type {
+  ClaimCheck,
+  ClaimCheckOptions,
+  ClaimCheckResult,
+  ClaimSource,
+  ClaimVerdict,
+} from './trace-claim-check.js';

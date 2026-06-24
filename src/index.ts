@@ -344,6 +344,28 @@ export type {
   ToolOutcome,
 } from './checks/index.js';
 
+// Claim↔proof cross-check (Section F, slice 3 — Tier 1+2, PROOF only)
+//
+// Falsifies each model CLAIM (a chosen tool, or a stated action in narration/
+// reasoning) against Tier-1 PROOF (the harness's actual tool results). Verdicts
+// are deterministic — verified / contradicted / unverifiable; `unverifiable`
+// claims are EXCLUDED from the score and surfaced as instrumentation gaps,
+// never Tier-3-judged. Pairs with the behavioural footprint above; feeds
+// harness×model selection.
+export {
+  crossCheckClaims,
+  toHaveNoContradictedClaims,
+  toHaveClaimIntegrityAtLeast,
+  toHaveInstrumentationGapsAtMost,
+} from './checks/index.js';
+export type {
+  ClaimCheck,
+  ClaimCheckOptions,
+  ClaimCheckResult,
+  ClaimSource,
+  ClaimVerdict,
+} from './checks/index.js';
+
 // Production Monitoring (Phase 3.5 - Transcript Reader + Historical Scoring)
 export {
   parseTranscript,

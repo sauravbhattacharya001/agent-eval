@@ -376,3 +376,19 @@ export type {
   ConfidenceLabelingOptions,
   LabeledVerdict,
 } from './confidence.js';
+
+export {
+  // Behavioural footprint (Section F, slice 2 — Tier 1+2, PROOF only)
+  analyzeFootprint,
+  // Proof-only predicates
+  toCompleteWithinSteps,
+  toHaveToolErrorRateBelow,
+  toNotThrash,
+  toRecoverFromErrors,
+} from './trace-footprint.js';
+
+export type {
+  FootprintOptions,
+  FootprintResult,
+  ToolOutcome,
+} from './trace-footprint.js';

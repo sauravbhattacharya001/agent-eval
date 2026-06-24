@@ -326,6 +326,24 @@ export type {
   LabeledVerdict,
 } from './checks/index.js';
 
+// Behavioural footprint (Section F, slice 2 — Tier 1+2, PROOF only)
+//
+// Mechanical per-run metrics (steps, tool-error rate, retry/thrash, recovery,
+// cost) computed over PROOF-labeled trace records only. Pairs with the trace
+// provenance map below; feeds harness×model selection. Never reads model claims.
+export {
+  analyzeFootprint,
+  toCompleteWithinSteps,
+  toHaveToolErrorRateBelow,
+  toNotThrash,
+  toRecoverFromErrors,
+} from './checks/index.js';
+export type {
+  FootprintOptions,
+  FootprintResult,
+  ToolOutcome,
+} from './checks/index.js';
+
 // Production Monitoring (Phase 3.5 - Transcript Reader + Historical Scoring)
 export {
   parseTranscript,

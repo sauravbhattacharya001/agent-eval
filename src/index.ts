@@ -416,6 +416,9 @@ export {
   labelField,
   provenanceMap,
   ingestTrace,
+  rankSelection,
+  toSelectionRun,
+  parseSelectionKey,
 } from './monitoring/index.js';
 export type {
   Transcript,
@@ -474,6 +477,12 @@ export type {
   TraceEvent,
   TraceToolCall,
   TraceDecision,
+  SelectionAxis,
+  SelectionOptions,
+  SelectionWeights,
+  SelectionRun,
+  SelectionCandidate,
+  SelectionScorecard,
 } from './monitoring/index.js';
 
 // GitHub Action Integration (Phase 4 — CI quality gate)

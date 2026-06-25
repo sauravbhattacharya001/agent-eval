@@ -185,3 +185,21 @@ export type {
   TraceToolCall,
   TraceDecision,
 } from './trace-provenance.js';
+
+// ─── Selection Ranking (Section F, slice 4) ────────────────────────
+//
+// The §F capstone: aggregate the slice-2 footprint + slice-3 claim integrity
+// across N runs of one task (hold model OR harness fixed, vary the other) into a
+// ranked scorecard — "given model M, which harness?" / "given harness H, which
+// model?". Tier 1+2 only, PROOF-derived, read-only, pure.
+
+export { rankSelection, toSelectionRun, parseSelectionKey } from './trace-selection.js';
+
+export type {
+  SelectionAxis,
+  SelectionOptions,
+  SelectionWeights,
+  SelectionRun,
+  SelectionCandidate,
+  SelectionScorecard,
+} from './trace-selection.js';

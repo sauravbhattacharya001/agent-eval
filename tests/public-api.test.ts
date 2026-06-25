@@ -63,6 +63,14 @@ const PILLAR_FUNCTIONS = {
     'analyzeTaskGrounding',
     'analyzeCiStaleness',
   ],
+  // Section F (agent-eval's unfrozen pillar) — harness×model selection, Tier 1+2
+  // only. Slice 4 is the capstone that ranks a controlled sweep; pin its public
+  // entry points so the selection answer stays a first-class, callable surface.
+  'section F — selection ranking (slice 4)': [
+    'rankSelection',
+    'toSelectionRun',
+    'parseSelectionKey',
+  ],
 } as const;
 
 /**

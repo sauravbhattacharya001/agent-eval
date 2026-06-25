@@ -280,3 +280,90 @@ describe('rankSelection — end-to-end over recorded fixtures (read-only)', () =
     ).toThrow(/exactly one variable fixed/i);
   });
 });
+
+describe('rankSelection — controlled sweep over recorded fixtures (real Tier 1+2 pipeline)', () => {
+  // The `review-*` fixture pair holds the HARNESS fixed (`ci-review-harness`) and
+  // varies the MODEL on the SAME task — a genuine "given a harness, which model?"
+  // sweep. Both are fed through the real slice-2 (footprint) + slice-3
+  // (claim↔proof) pipeline, so this exercises the headline capability end-to-end
+  // on recorded trace data, not synthetic `SelectionRun`s. The clean run
+  // (`gpt-strong`) verifies every build/tests/push claim against PROOF; the flaky
+  // run (`llama-weak`) CLAIMS "build passed and pushed" while PROOF shows three
+  // errored builds and no push tool — so PROOF, never the narration, decides it.
+
+  it('infers the fixed harness and ranks the cleaner model first with a decisive winner', () => {
+    const card = rankSelection([
+      loadSession('review-clean-push'),
+      loadSession('review-flaky-push'),
+    ]);
+
+    // Axis inference on real data: same harness, two models → hold harness, rank models.
+    expect(card.fixed).toBe('harness');
+    expect(card.varied).toBe('model');
+    expect(card.fixedValue).toBe('ci-review-harness');
+    expect(card.totalRuns).toBe(2);
+
+    // The honest, low-error model wins decisively; the contradicted-claim model sinks.
+    expect(card.ranking.map((c) => c.name)).toEqual(['gpt-strong', 'llama-weak']);
+    expect(card.ranking[0]?.rank).toBe(1);
+    expect(card.ranking[1]?.rank).toBe(2);
+    expect(card.winner?.name).toBe('gpt-strong');
+    expect(card.summary).toBe('for harness ci-review-harness: gpt-strong > llama-weak');
+
+    // The score gap is real and large (clean PROOF + full integrity vs all-errored + contradicted).
+    expect(card.ranking[0]!.score).toBeGreaterThan(card.ranking[1]!.score);
+  });
+
+  it('surfaces PROOF-derived per-candidate signals from the real footprint + claim-check', () => {
+    const card = rankSelection([
+      loadSession('review-clean-push'),
+      loadSession('review-flaky-push'),
+    ]);
+    const clean = card.ranking.find((c) => c.name === 'gpt-strong')!;
+    const flaky = card.ranking.find((c) => c.name === 'llama-weak')!;
+
+    // Clean model: every decided claim verified, no PROOF contradictions, no errors, full recovery.
+    expect(clean.meanClaimIntegrity).toBe(1);
+    expect(clean.contradictedClaims).toBe(0);
+    expect(clean.meanToolErrorRate).toBe(0);
+    expect(clean.meanRecoveryRate).toBe(1);
+    expect(clean.cleanRun).toBe(true);
+
+    // Flaky model: integrity 0 because PROOF refutes the claims; every build errored, none recovered.
+    expect(flaky.meanClaimIntegrity).toBe(0);
+    expect(flaky.contradictedClaims).toBeGreaterThan(0);
+    expect(flaky.meanToolErrorRate).toBe(1);
+    expect(flaky.meanRecoveryRate).toBe(0);
+    expect(flaky.cleanRun).toBe(false);
+  });
+
+  it('reaches the same ranking whether reduced first or passed as raw sessions', () => {
+    const sessions = [loadSession('review-clean-push'), loadSession('review-flaky-push')];
+    const fromSessions = rankSelection(sessions);
+    // Pre-reduce to per-run signals (the other accepted input shape) and re-rank.
+    const fromSignals = rankSelection(sessions.map((s) => toSelectionRun(s)));
+    expect(fromSignals.summary).toBe(fromSessions.summary);
+    expect(fromSignals.ranking.map((c) => c.name)).toEqual(
+      fromSessions.ranking.map((c) => c.name),
+    );
+    expect(fromSignals.winner?.name).toBe(fromSessions.winner?.name);
+  });
+
+  it('honours an explicit fixed=harness on the real pair and is order-independent', () => {
+    const sessions = [loadSession('review-clean-push'), loadSession('review-flaky-push')];
+    const explicit = rankSelection(sessions, { fixed: 'harness' });
+    const reversed = rankSelection([...sessions].reverse(), { fixed: 'harness' });
+    expect(explicit.fixed).toBe('harness');
+    expect(explicit.summary).toBe('for harness ci-review-harness: gpt-strong > llama-weak');
+    // Determinism: reversing the cohort yields the identical ranking and summary.
+    expect(reversed.ranking.map((c) => c.name)).toEqual(explicit.ranking.map((c) => c.name));
+    expect(reversed.summary).toBe(explicit.summary);
+  });
+
+  it('does not mutate either source session (read-only over the real pipeline)', () => {
+    const sessions = [loadSession('review-clean-push'), loadSession('review-flaky-push')];
+    const before = sessions.map((s) => JSON.stringify(s));
+    rankSelection(sessions);
+    sessions.forEach((s, i) => expect(JSON.stringify(s)).toBe(before[i]));
+  });
+});

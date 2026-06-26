@@ -341,3 +341,123 @@ describe('claim-check predicates give a stable mechanical verdict', () => {
     expect(toHaveInstrumentationGapsAtMost(gappy, 1)).toBe(false);
   });
 });
+
+// ─── PROOF-anchoring seams: text signature + exit_code (the unforgeable core) ────
+//
+// These pin two falsification paths that the fixtures exercise only on their
+// *verified* side, so a regression on the *contradicted* side (or on the error
+// signal itself) would otherwise pass silently:
+//   • anchoring a generic shell tool to a predicate by its HARNESS result text
+//     (`proofSignatureKeywords`, e.g. `score=`), NOT by tool name — and letting
+//     that text-anchored PROOF *refute* the claim when it errored;
+//   • `exit_code` (a non-zero number) acting as the error verdict on its own,
+//     with no `is_error` field — and `exit_code: 0` correctly meaning success.
+
+describe('crossCheckClaims — text-signature anchoring decides via PROOF, not the name', () => {
+  it('CONTRADICTS "score green" when a generic tool with `score=` output errored', () => {
+    // The claim is anchored to a shell `run_command` (no "score" in its NAME)
+    // purely because the HARNESS wrote `score=` into its result text. That same
+    // PROOF errored, so the glowing claim is refuted — the text anchor reaches
+    // the contradiction branch, and the verdict still tracks PROOF only.
+    const session: TraceSession = {
+      events: [
+        {
+          event_type: 'tool_call',
+          tool_call: {
+            tool_name: 'run_command',
+            tool_input: { command: './gate.sh' },
+            tool_output: { is_error: true, stdout: 'score=0.41 FAIL', exit_code: 1 },
+          },
+        },
+        {
+          event_type: 'llm_call',
+          output_data: { text: 'The score was great and the gate is green, so we are good.' },
+        },
+      ],
+    };
+    const result = crossCheckClaims(session);
+    const scoreClaim = result.claims.find((c) => c.predicate === 'score:green');
+    expect(scoreClaim).toBeDefined();
+    // Refuted, and anchored to the generic tool's event (matched by text, not name).
+    expect(scoreClaim?.verdict).toBe('contradicted');
+    expect(scoreClaim?.proofEventIndex).toBe(0);
+    expect(scoreClaim?.reason).toContain('PROOF');
+  });
+
+  it('prefers a clean text-anchored PROOF over an earlier errored one (verified)', () => {
+    // Two generic shell results both carry `score=` (so both anchor the
+    // score:green predicate by TEXT): the first errored, the second is clean.
+    // `falsifyAgainstProof` must pick the non-errored anchor → verified, and
+    // cite the clean event — a verified PROOF result wins over an earlier error.
+    const session: TraceSession = {
+      events: [
+        {
+          event_type: 'tool_call',
+          tool_call: {
+            tool_name: 'run_command',
+            tool_output: { is_error: true, stdout: 'score=0.40 FAIL', exit_code: 1 },
+          },
+        },
+        {
+          event_type: 'tool_call',
+          tool_call: {
+            tool_name: 'run_command',
+            tool_output: { is_error: false, stdout: 'score=0.92 PASS' },
+          },
+        },
+        {
+          event_type: 'llm_call',
+          output_data: { text: 'After the fix the score was 0.92 and the gate is green.' },
+        },
+      ],
+    };
+    const result = crossCheckClaims(session);
+    const scoreClaim = result.claims.find((c) => c.predicate === 'score:green');
+    expect(scoreClaim?.verdict).toBe('verified');
+    expect(scoreClaim?.proofEventIndex).toBe(1); // the clean run, not the errored event 0
+  });
+});
+
+describe('crossCheckClaims — exit_code is an unforgeable error signal on its own', () => {
+  it('CONTRADICTS a chosen tool on a non-zero exit_code with NO is_error field', () => {
+    // No `is_error` key at all — the only failure signal is `exit_code: 2`. The
+    // invocation must still be contradicted (the harness exit code is PROOF the
+    // model cannot author).
+    const session: TraceSession = {
+      events: [
+        {
+          event_type: 'tool_call',
+          tool_call: { tool_name: 'run_tests', tool_output: { exit_code: 2, stdout: '2 failing' } },
+        },
+        { event_type: 'llm_call', output_data: { text: 'All tests pass now.' } },
+      ],
+    };
+    const result = crossCheckClaims(session);
+    const invocation = result.claims.find((c) => c.source === 'tool_invocation');
+    expect(invocation?.verdict).toBe('contradicted');
+    // The "tests pass" narration is anchored to the same errored tool by name → refuted.
+    const testsClaim = result.claims.find((c) => c.predicate === 'tests:pass');
+    expect(testsClaim?.verdict).toBe('contradicted');
+    expect(result.integrity).toBe(0);
+  });
+
+  it('treats exit_code: 0 (with no is_error) as a clean PROOF result', () => {
+    // The boundary the other direction: a finished command that exited 0 is a
+    // success. Guards against a regression that truthiness-checks exit_code
+    // instead of comparing `!== 0`.
+    const session: TraceSession = {
+      events: [
+        {
+          event_type: 'tool_call',
+          tool_call: { tool_name: 'run_tests', tool_output: { exit_code: 0, stdout: 'ok' } },
+        },
+        { event_type: 'llm_call', output_data: { text: 'The tests passed.' } },
+      ],
+    };
+    const result = crossCheckClaims(session);
+    expect(result.claims.find((c) => c.source === 'tool_invocation')?.verdict).toBe('verified');
+    expect(result.claims.find((c) => c.predicate === 'tests:pass')?.verdict).toBe('verified');
+    expect(result.contradicted).toBe(0);
+    expect(result.integrity).toBe(1);
+  });
+});

@@ -1,0 +1,77 @@
+{
+  "session_id": "sess-review-clean-103",
+  "agent_name": "gpt-strong@ci-review-harness",
+  "started_at": "2026-06-24T14:00:00.000Z",
+  "ended_at": "2026-06-24T14:00:18.000Z",
+  "status": "completed",
+  "total_tokens_in": 2900,
+  "total_tokens_out": 700,
+  "metadata": { "task": "build the project, run the tests, then push", "harness_version": "2.1.0" },
+  "events": [
+    {
+      "event_id": "evt-1",
+      "session_id": "sess-review-clean-103",
+      "event_type": "llm_call",
+      "timestamp": "2026-06-24T14:00:01.000Z",
+      "model": "gpt-strong",
+      "tokens_in": 1500,
+      "tokens_out": 260,
+      "duration_ms": 1200,
+      "input_data": { "prompt": "Build, test, and push if everything is green." },
+      "output_data": { "text": "Building first, then the test suite, and I'll only push on green." }
+    },
+    {
+      "event_id": "evt-2",
+      "session_id": "sess-review-clean-103",
+      "event_type": "tool_call",
+      "timestamp": "2026-06-24T14:00:03.000Z",
+      "duration_ms": 3600,
+      "tool_call": {
+        "tool_call_id": "tc-1",
+        "tool_name": "run_build",
+        "tool_input": { "command": "npm run build" },
+        "tool_output": { "exit_code": 0, "is_error": false, "stdout": "build ok" },
+        "duration_ms": 3500
+      }
+    },
+    {
+      "event_id": "evt-3",
+      "session_id": "sess-review-clean-103",
+      "event_type": "tool_call",
+      "timestamp": "2026-06-24T14:00:08.000Z",
+      "duration_ms": 4700,
+      "tool_call": {
+        "tool_call_id": "tc-2",
+        "tool_name": "run_tests",
+        "tool_input": { "command": "npm test" },
+        "tool_output": { "exit_code": 0, "is_error": false, "stdout": "42 passing" },
+        "duration_ms": 4600
+      }
+    },
+    {
+      "event_id": "evt-4",
+      "session_id": "sess-review-clean-103",
+      "event_type": "tool_call",
+      "timestamp": "2026-06-24T14:00:14.000Z",
+      "duration_ms": 700,
+      "tool_call": {
+        "tool_call_id": "tc-3",
+        "tool_name": "git_push",
+        "tool_input": { "branch": "main" },
+        "tool_output": { "exit_code": 0, "is_error": false, "stdout": "pushed 1 commit" },
+        "duration_ms": 660
+      }
+    },
+    {
+      "event_id": "evt-5",
+      "session_id": "sess-review-clean-103",
+      "event_type": "llm_call",
+      "timestamp": "2026-06-24T14:00:16.000Z",
+      "model": "gpt-strong",
+      "tokens_in": 1100,
+      "tokens_out": 420,
+      "duration_ms": 1000,
+      "output_data": { "text": "Build passed, tests passed, and I pushed to main. Done." }
+    }
+  ]
+}

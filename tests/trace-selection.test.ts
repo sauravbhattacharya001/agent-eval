@@ -367,3 +367,122 @@ describe('rankSelection — controlled sweep over recorded fixtures (real Tier 1
     sessions.forEach((s, i) => expect(JSON.stringify(s)).toBe(before[i]));
   });
 });
+
+describe('rankSelection — multi-run-per-candidate cohort over recorded fixtures (real mean-aggregation)', () => {
+  // The single-run `review-*` sweep above proves the *ranking* on recorded data,
+  // but with one run per model it never exercises `aggregateCandidate`'s
+  // mean/sum over MULTIPLE real runs of the same candidate. This cohort adds a
+  // SECOND recorded run per model — each with a genuinely DIFFERENT behavioural
+  // footprint — so every aggregate is a non-trivial average of two distinct
+  // traces, not N copies of one. It keeps the harness fixed (`ci-review-harness`)
+  // and the same task, so it stays a controlled "given a harness, which model?"
+  // sweep, fed end-to-end through the real slice-2 (footprint) + slice-3
+  // (claim↔proof) pipeline.
+  //
+  //   gpt-strong: run-1 clean (5300 tok) + run-2 clean but leaner (3600 tok)
+  //               → both verified, errorRate 0, integrity 1.
+  //   llama-weak: run-1 thrashes (3 errored builds, errorRate 1, no recovery,
+  //               integrity 0) + run-2 a DIFFERENT failure shape (build+tests
+  //               pass, push errors → errorRate 1/3, recovers nothing,
+  //               integrity 0.667, push CLAIM contradicted by PROOF).
+  //
+  // So the means are real: gpt-strong tokens (5300+3600)/2 = 4450; llama-weak
+  // errorRate (1+0.333…)/2 ≈ 0.667, recovery (0+1)/2 = 0.5, integrity
+  // (0+0.667…)/2 ≈ 0.333, contradictions summed (4+2) = 6.
+
+  const COHORT = [
+    'review-clean-push',
+    'review-clean-push-2',
+    'review-flaky-push',
+    'review-flaky-push-2',
+  ] as const;
+
+  const rankCohort = () => rankSelection(COHORT.map((n) => loadSession(n)));
+
+  it('still ranks the honest model first with a decisive winner over four runs', () => {
+    const card = rankCohort();
+    expect(card.fixed).toBe('harness');
+    expect(card.varied).toBe('model');
+    expect(card.fixedValue).toBe('ci-review-harness');
+    // Four sessions collapse to two candidates (two runs each).
+    expect(card.totalRuns).toBe(4);
+    expect(card.ranking.map((c) => c.name)).toEqual(['gpt-strong', 'llama-weak']);
+    expect(card.ranking.every((c) => c.runs === 2)).toBe(true);
+    expect(card.winner?.name).toBe('gpt-strong');
+    expect(card.summary).toBe('for harness ci-review-harness: gpt-strong > llama-weak');
+  });
+
+  it('averages the clean model over two DIFFERENT recorded runs (real mean, not duplicates)', () => {
+    const clean = rankCohort().ranking.find((c) => c.name === 'gpt-strong')!;
+    expect(clean.runs).toBe(2);
+    // The two clean runs spend different token budgets, so the mean is a true
+    // average of distinct values, not the figure of a single run.
+    expect(clean.meanTotalTokens).toBe((5300 + 3600) / 2); // 4450
+    // Both runs are clean and honest → the integrity/error/recovery aggregates
+    // are unanimous (and stay unanimous under averaging).
+    expect(clean.meanClaimIntegrity).toBe(1);
+    expect(clean.meanToolErrorRate).toBe(0);
+    expect(clean.meanRecoveryRate).toBe(1);
+    expect(clean.contradictedClaims).toBe(0);
+    expect(clean.cleanRun).toBe(true);
+  });
+
+  it('averages the weak model across two DIFFERENT failure shapes (mean spans both)', () => {
+    const flaky = rankCohort().ranking.find((c) => c.name === 'llama-weak')!;
+    expect(flaky.runs).toBe(2);
+    // run-1 errorRate 1 (all builds failed) + run-2 errorRate 1/3 (only push
+    // failed) → mean lands strictly BETWEEN the two runs, proving the average
+    // is computed over both rather than echoing either one. (The scorecard
+    // rounds aggregates to 3 dp, so compare at 3-dp tolerance.)
+    expect(flaky.meanToolErrorRate).toBeCloseTo((1 + 1 / 3) / 2, 3); // ≈ 0.667
+    expect(flaky.meanToolErrorRate).toBeGreaterThan(1 / 3);
+    expect(flaky.meanToolErrorRate).toBeLessThan(1);
+    // run-1 recovered nothing (0) + run-2 had no recoverable error (1) → mean 0.5.
+    expect(flaky.meanRecoveryRate).toBeCloseTo(0.5, 3);
+    // run-1 integrity 0 + run-2 integrity 0.667 → mean ≈ 0.333 (still failing).
+    expect(flaky.meanClaimIntegrity).toBeCloseTo((0 + 2 / 3) / 2, 3);
+    // Contradictions are a SUM across the candidate's runs (4 + 2), not a mean.
+    expect(flaky.contradictedClaims).toBe(6);
+    // One bad run is enough to disqualify the candidate as clean.
+    expect(flaky.cleanRun).toBe(false);
+  });
+
+  it('keeps the per-candidate mean independent of run order within the cohort', () => {
+    const forward = rankCohort();
+    const shuffled = rankSelection(
+      [
+        loadSession('review-flaky-push-2'),
+        loadSession('review-clean-push-2'),
+        loadSession('review-flaky-push'),
+        loadSession('review-clean-push'),
+      ],
+    );
+    const meanOf = (card: ReturnType<typeof rankSelection>, name: string) => {
+      const c = card.ranking.find((r) => r.name === name)!;
+      return [c.meanTotalTokens, c.meanToolErrorRate, c.meanClaimIntegrity, c.contradictedClaims];
+    };
+    // Aggregation groups by candidate, so the means/sums are identical regardless
+    // of the order the four runs arrive in.
+    expect(meanOf(shuffled, 'gpt-strong')).toEqual(meanOf(forward, 'gpt-strong'));
+    expect(meanOf(shuffled, 'llama-weak')).toEqual(meanOf(forward, 'llama-weak'));
+    expect(shuffled.summary).toBe(forward.summary);
+  });
+
+  it('reaches the same aggregates whether reduced to signals first or passed as raw sessions', () => {
+    const sessions = COHORT.map((n) => loadSession(n));
+    const fromSessions = rankCohort();
+    // Pre-reducing each session to a SelectionRun (the other accepted input)
+    // must aggregate to exactly the same per-candidate figures.
+    const fromSignals = rankSelection(sessions.map((s) => toSelectionRun(s)));
+    expect(fromSignals.ranking).toEqual(fromSessions.ranking);
+    expect(fromSignals.summary).toBe(fromSessions.summary);
+    expect(fromSignals.winner?.name).toBe(fromSessions.winner?.name);
+  });
+
+  it('does not mutate any of the four source sessions (read-only over the real pipeline)', () => {
+    const sessions = COHORT.map((n) => loadSession(n));
+    const before = sessions.map((s) => JSON.stringify(s));
+    rankSelection(sessions);
+    sessions.forEach((s, i) => expect(JSON.stringify(s)).toBe(before[i]));
+  });
+});

@@ -1,0 +1,5 @@
+{"type":"session","version":3,"id":"clean-0000-0000-0000-000000000003","timestamp":"2026-01-03T09:00:00.000Z","cwd":"/workspace/sample"}
+{"type":"message","id":"c1","parentId":null,"timestamp":"2026-01-03T09:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"Synthetic task: rename a sample variable and confirm (fixture stand-in)."}]}}
+{"type":"message","id":"c2","parentId":"c1","timestamp":"2026-01-03T09:00:30.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Renaming the sample variable now."},{"type":"toolCall","id":"v1","name":"edit","input":{"path":"sample.ts"}}],"usage":{"totalTokens":42000},"stopReason":"toolUse"}}
+{"type":"message","id":"c3","parentId":"c2","timestamp":"2026-01-03T09:00:45.000Z","message":{"role":"toolResult","content":[{"type":"text","text":"edit applied (synthetic)"}]}}
+{"type":"message","id":"c4","parentId":"c3","timestamp":"2026-01-03T09:01:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Done. The synthetic rename is complete and verified."}],"usage":{"totalTokens":58000},"stopReason":"stop"}}

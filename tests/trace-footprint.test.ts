@@ -311,3 +311,108 @@ describe('footprint threshold flags and predicates', () => {
     expect(toRecoverFromErrors(analyzeFootprint(session))).toBe(false);
   });
 });
+
+// ─── Malformed / partial provenance (robustness over imperfect traces) ──────────
+//
+// Real traces are imperfect: a harness may log a tool RESULT (PROOF) but omit
+// the chosen tool_name (CLAIM), emit a partial token rollup, or carry a
+// non-numeric timing/exit field. The footprint must stay mechanical and never
+// crash, NaN-poison an aggregate, or silently invent a success/failure. These
+// pin that behaviour so a later refactor can't regress it.
+
+describe('analyzeFootprint — malformed / partial provenance', () => {
+  it('labels a tool result with no tool_name as <unknown> and still groups a same-tool retry streak', () => {
+    // PROOF (tool_output) is present but the CLAIM (tool_name) was never emitted.
+    // The fallback label must be stable so two un-named errored calls still count
+    // as the SAME tool for retry-streak attribution (PROOF drives the verdict;
+    // the missing label only affects grouping, and it groups deterministically).
+    const session: TraceSession = {
+      events: [
+        { event_type: 'tool_call', tool_call: { tool_output: { is_error: true } } },
+        { event_type: 'tool_call', tool_call: { tool_output: { is_error: true } } },
+      ],
+    };
+    const fp = analyzeFootprint(session);
+    expect(fp.outcomes.map((o) => o.toolName)).toEqual(['<unknown>', '<unknown>']);
+    expect(fp.toolErrors).toBe(2);
+    // Same fallback label on both → a retry streak of 2 (the first errored).
+    expect(fp.longestRetryStreak).toBe(2);
+    expect(fp.retryCount).toBe(1);
+  });
+
+  it('treats an empty-string tool_name as <unknown> (no zero-length label leaks through)', () => {
+    // The ingest guard keeps `<unknown>` for an empty tool_name, so the label is
+    // never a confusing '' in a summary or retry attribution.
+    const session: TraceSession = {
+      events: [
+        { event_type: 'tool_call', tool_call: { tool_name: '', tool_output: { is_error: false } } },
+      ],
+    };
+    expect(analyzeFootprint(session).outcomes[0].toolName).toBe('<unknown>');
+  });
+
+  it('counts a non-finite exit_code (NaN) as an error — a garbage exit is not a pass', () => {
+    // isErrorResult admits any non-zero numeric exit_code; NaN is `typeof
+    // number` and `!== 0`, so it is treated as an error. This is deliberate:
+    // absence of a clean exit_code 0 must never be scored as success.
+    const session: TraceSession = {
+      events: [
+        { event_type: 'tool_call', tool_call: { tool_name: 't', tool_output: { exit_code: NaN } } },
+      ],
+    };
+    const fp = analyzeFootprint(session);
+    expect(fp.outcomes[0].isError).toBe(true);
+    expect(fp.toolErrors).toBe(1);
+  });
+
+  it('ignores a non-numeric duration_ms instead of NaN-poisoning the total', () => {
+    // numericValue rejects a non-finite/non-number duration, so a malformed
+    // timing field contributes 0 — the aggregate stays a clean number.
+    const session: TraceSession = {
+      events: [
+        {
+          event_type: 'tool_call',
+          tool_call: { tool_name: 'a', tool_output: { is_error: false }, duration_ms: 'fast' as unknown as number },
+        },
+        {
+          event_type: 'tool_call',
+          tool_call: { tool_name: 'b', tool_output: { is_error: false }, duration_ms: 120 },
+        },
+      ],
+    };
+    const fp = analyzeFootprint(session);
+    expect(Number.isFinite(fp.toolDurationMs)).toBe(true);
+    expect(fp.toolDurationMs).toBe(120);
+  });
+
+  it('handles a PARTIAL token rollup per-direction (rollup for one, per-event sum for the other)', () => {
+    // Only total_tokens_in is present on the session. tokensIn uses that PROOF
+    // rollup; tokensOut independently falls back to summing the per-event PROOF
+    // meters — the two directions are resolved separately, not all-or-nothing.
+    const session: TraceSession = {
+      total_tokens_in: 999,
+      events: [
+        { event_type: 'llm_call', tokens_in: 10, tokens_out: 7 },
+        { event_type: 'llm_call', tokens_in: 5, tokens_out: 3 },
+      ],
+    };
+    const fp = analyzeFootprint(session);
+    expect(fp.tokensIn).toBe(999); // authoritative rollup
+    expect(fp.tokensOut).toBe(10); // 7 + 3 per-event fallback
+  });
+
+  it('ignores a non-finite token rollup and falls back to the per-event sum', () => {
+    // A NaN rollup is not a usable PROOF number → numericValue rejects it and the
+    // per-event meters are summed instead (no NaN leaks into the footprint).
+    const session: TraceSession = {
+      total_tokens_in: NaN,
+      events: [
+        { event_type: 'llm_call', tokens_in: 4, tokens_out: 2 },
+        { event_type: 'llm_call', tokens_in: 6, tokens_out: 1 },
+      ],
+    };
+    const fp = analyzeFootprint(session);
+    expect(fp.tokensIn).toBe(10); // 4 + 6 (rollup rejected)
+    expect(fp.tokensOut).toBe(3); // 2 + 1
+  });
+});

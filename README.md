@@ -8,6 +8,8 @@ Three ways to use it:
 - **Fleet monitoring** - score a directory of run transcripts, track score trends over time, and roll them up into a health scorecard.
 - **CI quality gate** - block a GitHub Action when an agent's output is empty, stale, off-task, or contradicts the run's real outcome.
 
+It reads hand-authored transcripts *and* raw agent logs: an [OpenClaw session adapter](#fleet-triage-rank-failed-runs-by-cost) turns on-disk `.jsonl` sessions into evaluable timelines, and [fleet triage](#fleet-triage-rank-failed-runs-by-cost) ranks the runs that failed expensively — worst first, with a projected dollar cost.
+
 ## Features
 
 - **Live agent evaluation** - run agents against real LLMs, capture tool calls, evaluate output
@@ -15,6 +17,8 @@ Three ways to use it:
 - ⚖️ **LLM-as-judge** - structured rubrics, calibration, consensus & adversarial judging
 - 🔍 **Hallucination detection** - flag fabricated facts, broken links, invented references
 - 📐 **Drift & staleness** - catch agents that sidetrack, stall, or produce nothing actionable
+- 💸 **Fleet triage** - rank the runs that failed expensively (abandoned / timed-out / runaway) by burned tokens and projected dollar cost
+- 🔌 **Raw-log adapter** - evaluate on-disk OpenClaw `.jsonl` sessions directly, not just curated transcripts
 - 🛰️ **Ground-truth verification** - cross-check a transcript's self-reported outcome against trusted orchestrator metadata
 - 🚦 **CI quality gate** - gate a GitHub Action on agent output quality (deterministic, offline)
 - ✅ **Clear pass/fail** - results with evidence for what went wrong
@@ -312,6 +316,47 @@ console.log(card.grade);  // healthy | watch | at-risk | critical
 | `buildScorecard(dir, opts)` | Fleet health grade for the window |
 
 `scoreTranscript` also accepts `runMetadata` to cross-check a run's self-reported outcome against trusted orchestrator data - see [Verifying claims against ground truth](#ci-quality-gate-github-action).
+
+## Fleet Triage (rank failed runs by cost)
+
+The scorecard answers *"is worker X healthy on average?"*. Triage answers the operational question: ***"which specific runs failed expensively, worst first?"*** It walks a directory of agent sessions, runs the deterministic staleness check on each, and emits one ranked row per run that broke - abandoned, timed-out, runaway, or stalled - annotated with the tokens it burned and a projected dollar cost on usage-based pricing. Deterministic and offline (no model-as-judge).
+
+Where transcripts are hand-authored `.md`, real fleets write raw `.jsonl` session logs. The **OpenClaw adapter** (`buildAllSessions` / `buildSession` / `listSessions`) converts those - reconciling bare logs, `.trajectory.jsonl` companions, and checkpoint snapshots into one `RunTimeline` per logical session - so triage runs straight off disk.
+
+```typescript
+import { triageSessions, renderTriageTable } from 'agent-eval';
+
+const report = triageSessions('./sessions', { dollarsPerMillionTokens: 9 });
+console.log(renderTriageTable(report, 15));
+console.log(`Projected waste: $${report.projectedCostUsd.toFixed(0)}`);
+```
+
+```text
+Scanned 2968 sessions — 88 failed (67 costly). Projected waste: $1826 @ $9/M tokens.
+
+| # | Session    | Kind    | Duration | Tokens | ~$   | What went wrong |
+|---|------------|---------|----------|--------|------|-----------------|
+| 1 | 17dc8997   | timeout | 59m      | 19.3M  | $174 | idle/timeout abandon — never finished |
+| 2 | dc0f2ecd   | timeout | 60m      | 14.1M  | $127 | idle/timeout abandon — never finished |
+| 3 | b53a4550   | timeout | 10h36m   | 8.8M   | $79  | idle/timeout abandon — never finished |
+```
+
+| Entry point | What it does |
+|-------------|--------------|
+| `triageSessions(dir, opts)` | Scan a sessions dir → ranked {@link TriageReport} |
+| `triageBuilt(sessions, opts)` | Triage already-built sessions (pure, no I/O) |
+| `triageOne(session, opts)` | One session → a {@link TriageRow}, or `null` if it ran clean |
+| `renderTriageTable(report, n)` | Render the top-N failures as a Markdown table |
+| `buildAllSessions(dir)` | OpenClaw adapter: raw `.jsonl` → evaluable sessions |
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `dollarsPerMillionTokens` | `9` | Blended rate for the cost projection |
+| `costlyTokenThreshold` | `200_000` | Tokens at/above which a failure is "costly" vs. a trivial error |
+| `costlyRuntimeMs` | `600_000` | Runtime (10m) that also marks a failure costly |
+| `staleOnly` | `true` | Only `isStale` runs (vs. any run that didn't end cleanly) |
+
+Each `TriageRow` carries `id`, `label`, `kind` (`timeout` \| `abandoned` \| `runaway` \| `stalled` \| `errored`), `tokenUsage`, `runtimeMs`, `projectedCostUsd`, a `costly` flag, and a one-line `summary`. **Scope:** triage catches *process* failure (the run broke or ran away), not *correctness* (a run that finished cleanly but did the wrong thing) - that needs the Tier-3 judge.
 
 ## CI Quality Gate (GitHub Action)
 

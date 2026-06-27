@@ -85,3 +85,17 @@ export type {
   CcaRunExtract,
   ExtractCcaRunOptions,
 } from './cca-execution.js';
+
+export {
+  triageSessions,
+  triageBuilt,
+  triageOne,
+  renderTriageTable,
+} from './triage.js';
+
+export type {
+  TriageOptions,
+  TriageReport,
+  TriageRow,
+  FailureKind,
+} from './triage.js';

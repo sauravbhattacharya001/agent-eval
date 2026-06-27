@@ -531,3 +531,14 @@ export type {
   CcaRunExtract,
   ExtractCcaRunOptions,
 } from './action/index.js';
+export {
+  triageSessions,
+  triageBuilt,
+  triageOne,
+  renderTriageTable,
+} from './action/index.js';
+export type { TriageOptions, TriageReport, TriageRow, FailureKind } from './action/index.js';
+
+// Adapters (raw agent log formats -> agent-eval inputs)
+export { buildSession, buildAllSessions, listSessions } from './adapters/index.js';
+export type { BuiltSession, SessionMeta, SessionDescriptor, SessionSource } from './adapters/index.js';

@@ -239,6 +239,101 @@ describe('rankSelection — ranking behaviour', () => {
   });
 });
 
+describe('rankSelection — tie, weight, and threshold boundaries', () => {
+  // The happy-path ranking tests above cover a clean win and a simple two-way
+  // tie. These pin the boundary behaviours a future refactor of the
+  // scoring/tie-break/sanitization seams could silently break — each one is an
+  // invariant that keeps the ranker deterministic and Tier-1+2-honest.
+
+  it('gives a THREE-candidate partial tie competition ranks (1,1,3) and no winner', () => {
+    // Two identical clean candidates tie at the top; a third, clearly worse one
+    // sits below. Standard competition ranking → the tied pair share rank 1 and
+    // the next candidate is rank 3 (not 2), and a shared rank-1 is not decisive.
+    const card = rankSelection([
+      run({ harness: 'twinA' }),
+      run({ harness: 'twinB' }),
+      run({
+        harness: 'worse',
+        toolErrorRate: 0.9,
+        recoveryRate: 0,
+        longestRetryStreak: 4,
+        contradictedClaims: 1,
+        claimIntegrity: 0,
+      }),
+    ]);
+    expect(card.ranking.map((c) => c.rank)).toEqual([1, 1, 3]); // skips rank 2
+    expect(card.ranking[2]?.name).toBe('worse');
+    expect(card.ranking[0]!.score).toBeGreaterThan(card.ranking[2]!.score);
+    expect(card.winner).toBeNull(); // top tie → no decisive answer even with a 3rd below
+    expect(card.summary).toBe('for model model-a: twinA = twinB > worse'); // = then >
+  });
+
+  it('collapses every score to 0 when ALL weights are 0, yet still orders by the evidence tie-break', () => {
+    // With no signal weighted, scoreCandidate hits the totalWeight<=0 → 0 branch
+    // for every candidate. Crucially the order is NOT then arbitrary: equal (0)
+    // scores fall through to the evidence-based tie-break cascade, so the lower
+    // tool-error candidate still ranks first and — because the tie-break KEY
+    // differs — it is a DECISIVE winner, not a shared-rank tie.
+    const card = rankSelection(
+      [run({ harness: 'low-error', toolErrorRate: 0 }), run({ harness: 'high-error', toolErrorRate: 0.9 })],
+      {
+        weights: {
+          integrity: 0,
+          contradictions: 0,
+          errorRate: 0,
+          recovery: 0,
+          thrash: 0,
+          steps: 0,
+          cost: 0,
+        },
+      },
+    );
+    expect(card.ranking.every((c) => c.score === 0)).toBe(true); // no signal counted
+    expect(card.ranking.map((c) => c.name)).toEqual(['low-error', 'high-error']);
+    expect(card.ranking.map((c) => c.rank)).toEqual([1, 2]); // distinct ranks (tie-break separates)
+    expect(card.winner?.name).toBe('low-error'); // decisive: equal score, different tie-break key
+  });
+
+  it('sanitizes negative / NaN / Infinity weights back to the defaults (identical scorecard)', () => {
+    // sanitizeWeights drops any weight that is not a finite, >= 0 number, so a
+    // caller passing garbage gets the default-weighted result — never a NaN
+    // score or an Infinity-dominated ranking. Equivalent to passing no weights.
+    const cohort = [
+      run({ harness: 'cheap', totalTokens: 100 }),
+      run({ harness: 'pricey', totalTokens: 9000 }),
+    ];
+    const defaults = rankSelection(cohort);
+    const garbage = rankSelection(cohort, {
+      weights: { cost: -5, integrity: Number.NaN, errorRate: Number.POSITIVE_INFINITY },
+    });
+    // Every score is finite (no NaN/Infinity leaked through) and the full
+    // scorecard matches the default-weighted one field-for-field.
+    expect(garbage.ranking.every((c) => Number.isFinite(c.score))).toBe(true);
+    expect(garbage.ranking).toEqual(defaults.ranking);
+    expect(garbage.summary).toBe(defaults.summary);
+    expect(garbage.winner?.name).toBe(defaults.winner?.name);
+  });
+
+  it('uses maxToolErrorRate ONLY for the cleanRun flag, inclusively, defaulting to 0.5', () => {
+    // maxToolErrorRate never filters a candidate out of the ranking — it only
+    // decides the cleanRun convenience flag, and the bound is INCLUSIVE.
+    const errRate = (rate: number) => run({ harness: 'h', toolErrorRate: rate });
+
+    // Same run, two thresholds: above the strict bound → not clean; within the
+    // lenient bound → clean. The candidate is present (ranked) either way.
+    const strict = rankSelection([errRate(0.4)], { maxToolErrorRate: 0.3 });
+    const lenient = rankSelection([errRate(0.4)], { maxToolErrorRate: 0.5 });
+    expect(strict.ranking).toHaveLength(1);
+    expect(strict.ranking[0]?.cleanRun).toBe(false);
+    expect(lenient.ranking[0]?.cleanRun).toBe(true);
+
+    // Default threshold is 0.5 and inclusive: exactly 0.5 is still clean, 0.6 is not.
+    expect(rankSelection([errRate(0.4)]).ranking[0]?.cleanRun).toBe(true);
+    expect(rankSelection([errRate(0.5)]).ranking[0]?.cleanRun).toBe(true); // boundary, inclusive
+    expect(rankSelection([errRate(0.6)]).ranking[0]?.cleanRun).toBe(false);
+  });
+});
+
 describe('rankSelection — end-to-end over recorded fixtures (read-only)', () => {
   it('reduces a recorded session to a per-run signal via the real slice-2/3 pipeline', () => {
     const session = loadSession('sentinel-push');

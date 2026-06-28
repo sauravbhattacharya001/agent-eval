@@ -311,6 +311,16 @@ async function main(): Promise<void> {
      VALUES (?, ?, ?, ?, 'insight', ?, ?)`,
   );
 
+  // Idempotent re-judge: a session may be judged more than once across runs
+  // (e.g. a recovery pass retrying earlier JSON-parse failures). Without this,
+  // each pass appends a NEW annotation, leaving duplicate verdicts in the DB.
+  // Delete any prior judge annotation from THIS provider for the session first,
+  // so a re-judge replaces rather than accumulates.
+  const delPrev = db.prepare(
+    `DELETE FROM annotations
+      WHERE session_id = ? AND annotation_type = 'insight' AND author = ?`,
+  );
+
   let spentUsd = 0;
   let judged = 0, skipped = 0, errors = 0;
   const startedAt = Date.now();
@@ -377,7 +387,9 @@ async function main(): Promise<void> {
           `${ann.result.summary ?? ''}\n` +
           (ann.result.suggestions?.length ? `suggestions: ${ann.result.suggestions.join('; ')}` : '');
         const now = new Date().toISOString();
-        insert.run(randomUUID(), sess.session_id, text.trim(), `judge/${args.provider}`, now, now);
+        const authorId = `judge/${args.provider}`;
+        delPrev.run(sess.session_id, authorId);
+        insert.run(randomUUID(), sess.session_id, text.trim(), authorId, now, now);
       }
       judged++;
     } catch (err) {

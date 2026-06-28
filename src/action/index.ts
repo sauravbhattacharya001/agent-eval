@@ -99,3 +99,12 @@ export type {
   TriageRow,
   FailureKind,
 } from './triage.js';
+
+export { createGuard } from './guard.js';
+
+export type {
+  Guard,
+  GuardOptions,
+  GuardVerdict,
+  GuardStopKind,
+} from './guard.js';

@@ -536,8 +536,10 @@ export {
   triageBuilt,
   triageOne,
   renderTriageTable,
+  createGuard,
 } from './action/index.js';
 export type { TriageOptions, TriageReport, TriageRow, FailureKind } from './action/index.js';
+export type { Guard, GuardOptions, GuardVerdict, GuardStopKind } from './action/index.js';
 
 // Adapters (raw agent log formats -> agent-eval inputs)
 export { buildSession, buildAllSessions, listSessions } from './adapters/index.js';

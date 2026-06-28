@@ -8,7 +8,7 @@ Three ways to use it:
 - **Fleet monitoring** - score a directory of run transcripts, track score trends over time, and roll them up into a health scorecard.
 - **CI quality gate** - block a GitHub Action when an agent's output is empty, stale, off-task, or contradicts the run's real outcome.
 
-It reads hand-authored transcripts *and* raw agent logs: an [OpenClaw session adapter](#fleet-triage-rank-failed-runs-by-cost) turns on-disk `.jsonl` sessions into evaluable timelines, and [fleet triage](#fleet-triage-rank-failed-runs-by-cost) ranks the runs that failed expensively — worst first, with a projected dollar cost.
+It reads hand-authored transcripts *and* raw agent logs: an [OpenClaw session adapter](#fleet-triage-rank-failed-runs-by-cost) turns on-disk `.jsonl` sessions into evaluable timelines, [fleet triage](#fleet-triage-rank-failed-runs-by-cost) ranks the runs that failed expensively — worst first, with a projected dollar cost — and an offline [fleet judge](#fleet-judge-offline-tier-3-second-opinion) runs a cost-capped Tier-3 second opinion over a fleet database.
 
 ## Features
 
@@ -18,6 +18,7 @@ It reads hand-authored transcripts *and* raw agent logs: an [OpenClaw session ad
 - 🔍 **Hallucination detection** - flag fabricated facts, broken links, invented references
 - 📐 **Drift & staleness** - catch agents that sidetrack, stall, or produce nothing actionable
 - 💸 **Fleet triage** - rank the runs that failed expensively (abandoned / timed-out / runaway) by burned tokens and projected dollar cost
+- ⚖️ **Fleet judge** - offline Tier-3 second opinion over a fleet DB; weighs the recorded outcome so a polished-but-failed run can't score `pass` (signal, never a gate)
 - 🔌 **Raw-log adapter** - evaluate on-disk OpenClaw `.jsonl` sessions directly, not just curated transcripts
 - 🛰️ **Ground-truth verification** - cross-check a transcript's self-reported outcome against trusted orchestrator metadata
 - 🚦 **CI quality gate** - gate a GitHub Action on agent output quality (deterministic, offline)
@@ -357,6 +358,38 @@ Scanned 2968 sessions — 88 failed (67 costly). Projected waste: $1826 @ $9/M t
 | `staleOnly` | `true` | Only `isStale` runs (vs. any run that didn't end cleanly) |
 
 Each `TriageRow` carries `id`, `label`, `kind` (`timeout` \| `abandoned` \| `runaway` \| `stalled` \| `errored`), `tokenUsage`, `runtimeMs`, `projectedCostUsd`, a `costly` flag, and a one-line `summary`. **Scope:** triage catches *process* failure (the run broke or ran away), not *correctness* (a run that finished cleanly but did the wrong thing) - that needs the Tier-3 judge.
+
+## Fleet Judge (offline Tier-3 second opinion)
+
+Triage is free and catches *process* failure; this is its paid counterpart for *correctness* - the operational Tier-3 step. `fleet-judge` walks the sessions in an **AgentLens SQLite DB**, renders each to a transcript document, runs the model-as-judge, and writes a **labeled, non-scoring** annotation (`[Tier-3 judge - opinion, not evidence]`) back into the `annotations` table. It is a **signal, never a gate** - these annotations must never feed the real-time Tier-1+2 gate.
+
+```bash
+# DRY-RUN by default - estimates tokens/cost, judges nothing, writes nothing
+node dist/scripts/fleet-judge.js --db fleet.db --limit 20
+
+# Actually judge + write annotations (OpenRouter, with a hard cost ceiling)
+JUDGE_API_KEY=sk-... node dist/scripts/fleet-judge.js --db fleet.db \
+  --execute --provider openrouter --model meta-llama/llama-3.3-70b-instruct \
+  --max-cost-usd 1 --delay-ms 3000
+```
+
+Why it doesn't get snowed by a *polished-but-false* final message (a run that timed out after burning $3 but whose deliverable reads as finished): the harness-recorded outcome (status / duration / abandon markers) is passed to the judge as **objective evidence** (`artifacts.execution_record`) - kept out of the deliverable/task so judge independence holds - and the default fleet rubric's dominant **`execution_integrity`** criterion (weight 0.45) means *a recorded timeout/abandon/error cannot score `pass`*, no matter how clean the output looks. The agent's own `(decision)` reasoning is stripped before the model ever sees it. The rubric still grades quality, so a **completed** run with off-task output also fails - it discriminates on quality, not just status.
+
+**Safety rails (all on by default):** dry-run unless `--execute`; a hard `--max-cost-usd` ceiling that aborts *before* exceeding; a per-session `--max-input-tokens` cap; resume (already-judged sessions are skipped); a request `--delay-ms` for rate-limit pacing with 429 backoff. Re-judging a session **replaces** its prior annotation from the same provider (idempotent), so recovery passes don't accumulate duplicates.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--db <path>` | *(required)* | AgentLens SQLite DB to read sessions / write annotations |
+| `--execute` | off (dry-run) | Actually call the judge and write annotations |
+| `--limit <N>` | all | Only the N most-recent sessions |
+| `--provider <p>` | `groq` | `groq` \| `openrouter` \| `openai` |
+| `--model <m>` | provider default | Judge model override |
+| `--max-cost-usd <n>` | `5` | Hard ceiling; aborts before exceeding |
+| `--max-input-tokens <n>` | `8000` | Per-session input cap |
+| `--delay-ms <n>` | `25000` | Pause between sessions (rate-limit pacing) |
+| `--dollars-per-mtok-in/-out` | `0.59` / `0.79` | Price for the cost projection |
+
+The API key is read from `JUDGE_API_KEY` (preferred), else `GROQ_API_KEY` / `OPENROUTER_API_KEY` / `OPENAI_API_KEY` by provider. Uses Node's built-in `node:sqlite` - no external deps.
 
 ## CI Quality Gate (GitHub Action)
 

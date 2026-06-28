@@ -1,28 +1,36 @@
 # agent-eval
 
-A lightweight, zero-dependency TypeScript toolkit for evaluating AI agent outputs - in tests, in production transcripts, and as a CI gate.
+A lightweight, zero-dependency TypeScript toolkit for evaluating AI agent outputs - in tests, across a production fleet, and as a CI gate.
 
-Three ways to use it:
+Every surface is built on one idea - an **[independence-first tier pyramid](#the-tier-pyramid)**: prefer checks the agent *cannot forge* (did it crash? did it stall? does its claim match the real exit status?) and fall back to a model-as-judge only for genuine quality calls. The result is mostly deterministic, offline, and free, with paid judging reserved for the ~20% that needs it.
 
-- **Eval framework** - Jest/Vitest-style assertions for agent outputs, with a 3-tier pyramid (deterministic → heuristic → model-as-judge).
-- **Fleet monitoring** - score a directory of run transcripts, track score trends over time, and roll them up into a health scorecard.
-- **CI quality gate** - block a GitHub Action when an agent's output is empty, stale, off-task, or contradicts the run's real outcome.
+## What you can do with it
 
-It reads hand-authored transcripts *and* raw agent logs: an [OpenClaw session adapter](#fleet-triage-rank-failed-runs-by-cost) turns on-disk `.jsonl` sessions into evaluable timelines, [fleet triage](#fleet-triage-rank-failed-runs-by-cost) ranks the runs that failed expensively — worst first, with a projected dollar cost — and an offline [fleet judge](#fleet-judge-offline-tier-3-second-opinion) runs a cost-capped Tier-3 second opinion over a fleet database.
+| Surface | Question it answers | Cost |
+|---------|---------------------|------|
+| **[Eval framework](#live-agent-evaluation)** | *Did this agent run do the thing?* - Jest/Vitest-style assertions over a live agent's output, run in tier order with auto short-circuit. | free → paid |
+| **[Fleet monitoring](#fleet-monitoring)** | *Is worker X healthy over time?* - score a directory of transcripts, track trends, roll up a health grade. | free |
+| **[Fleet triage](#fleet-triage-rank-failed-runs-by-cost)** | *Which runs failed expensively, worst first?* - rank broken runs by burned tokens and projected dollars, straight off raw `.jsonl` logs. | free |
+| **[Fleet judge](#fleet-judge-offline-tier-3-second-opinion)** | *Did the finished runs actually do good work?* - a cost-capped Tier-3 second opinion over a fleet database. | paid |
+| **[CI quality gate](#ci-quality-gate-github-action)** | *Should this job block?* - fail a GitHub Action on empty / stale / off-task output, or output that contradicts the run's real outcome. | free |
+
+It reads hand-authored transcripts *and* raw agent logs: an [OpenClaw session adapter](#fleet-triage-rank-failed-runs-by-cost) turns on-disk `.jsonl` sessions into evaluable timelines.
+
+> **Triage vs. judge** - the two fleet tools are complementary: *triage* is free and catches **process** failure (the run broke, stalled, or ran away); *judge* is its paid counterpart for **correctness** (a run that finished cleanly but did the wrong thing). Use triage to find the wreckage, judge to grade the survivors.
 
 ## Features
 
-- **Live agent evaluation** - run agents against real LLMs, capture tool calls, evaluate output
-- 🔺 **3-tier eval pyramid** - deterministic → heuristic → model-as-judge, auto short-circuit
+- **Live agent evaluation** - run agents against real LLMs, capture tool calls and a timeline, evaluate the output
+- 🔺 **3-tier eval pyramid** - deterministic → heuristic → model-as-judge, with automatic short-circuit
 - ⚖️ **LLM-as-judge** - structured rubrics, calibration, consensus & adversarial judging
 - 🔍 **Hallucination detection** - flag fabricated facts, broken links, invented references
 - 📐 **Drift & staleness** - catch agents that sidetrack, stall, or produce nothing actionable
-- 💸 **Fleet triage** - rank the runs that failed expensively (abandoned / timed-out / runaway) by burned tokens and projected dollar cost
-- ⚖️ **Fleet judge** - offline Tier-3 second opinion over a fleet DB; weighs the recorded outcome so a polished-but-failed run can't score `pass` (signal, never a gate)
-- 🔌 **Raw-log adapter** - evaluate on-disk OpenClaw `.jsonl` sessions directly, not just curated transcripts
 - 🛰️ **Ground-truth verification** - cross-check a transcript's self-reported outcome against trusted orchestrator metadata
+- 🔌 **Raw-log adapter** - evaluate on-disk OpenClaw `.jsonl` sessions directly, not just curated transcripts
+- 💸 **Fleet triage** - rank the runs that failed expensively (abandoned / timed-out / runaway) by burned tokens and projected dollar cost
+- 🧑‍⚖️ **Fleet judge** - cost-capped offline Tier-3 second opinion over a fleet DB; weighs the recorded outcome so a polished-but-failed run can't score `pass` (signal, never a gate)
 - 🚦 **CI quality gate** - gate a GitHub Action on agent output quality (deterministic, offline)
-- ✅ **Clear pass/fail** - results with evidence for what went wrong
+- ✅ **Clear pass/fail** - results carry evidence for what went wrong
 
 ## The Tier Pyramid
 
@@ -196,6 +204,8 @@ const tool = defineTool('search')
 
 ## LLM Judge (Tier 3)
 
+The last-resort tier: a model grades the output against a structured rubric. This is the per-assertion judge used inside a suite; to run the same judging engine over a whole fleet database, see [Fleet Judge](#fleet-judge-offline-tier-3-second-opinion).
+
 ```typescript
 import { BUILTIN_RUBRICS, buildRubric, LLMJudgeBackend } from 'agent-eval';
 
@@ -361,7 +371,7 @@ Each `TriageRow` carries `id`, `label`, `kind` (`timeout` \| `abandoned` \| `run
 
 ## Fleet Judge (offline Tier-3 second opinion)
 
-Triage is free and catches *process* failure; this is its paid counterpart for *correctness* - the operational Tier-3 step. `fleet-judge` walks the sessions in an **AgentLens SQLite DB**, renders each to a transcript document, runs the model-as-judge, and writes a **labeled, non-scoring** annotation (`[Tier-3 judge - opinion, not evidence]`) back into the `annotations` table. It is a **signal, never a gate** - these annotations must never feed the real-time Tier-1+2 gate.
+Triage and judge are the two halves of fleet review (see [Triage vs. judge](#what-you-can-do-with-it)): triage is free and catches *process* failure; this is its paid counterpart for *correctness*. It runs the same [Tier-3 judging engine](#llm-judge-tier-3) used inside a suite, but at fleet scale: `fleet-judge` walks the sessions in an **AgentLens SQLite DB**, renders each to a transcript document, runs the model-as-judge, and writes a **labeled, non-scoring** annotation (`[Tier-3 judge - opinion, not evidence]`) back into the `annotations` table. It is a **signal, never a gate** - these annotations must never feed the real-time Tier-1+2 gate.
 
 ```bash
 # DRY-RUN by default - estimates tokens/cost, judges nothing, writes nothing

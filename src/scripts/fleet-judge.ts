@@ -322,7 +322,11 @@ async function main(): Promise<void> {
   );
 
   let spentUsd = 0;
-  let judged = 0, skipped = 0, errors = 0;
+  // `judged` and `errors` are incremented in the loop; `skipped` is reserved for
+  // the summary line and never reassigned (resume-skips are filtered out by the
+  // SQL `NOT IN (... already-judged ...)` query), so it stays const.
+  let judged = 0, errors = 0;
+  const skipped = 0;
   const startedAt = Date.now();
   let firstCall = true;
 

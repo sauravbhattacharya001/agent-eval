@@ -118,6 +118,24 @@ describe('applyTokenCap — the cost guard', () => {
   it('estimateTokens is ~4 chars/token', () => {
     expect(estimateTokens('a'.repeat(40))).toBe(10);
   });
+
+  it('clamps to the cap even when an artifact must be emptied (delete branch is safe)', () => {
+    // Drive the final hard-clamp loop hard enough that an artifact is trimmed to
+    // empty and then removed. Exercises the dynamic key-removal branch; the
+    // load-bearing guarantee is that the cap is still honored and no surviving
+    // artifact value is a non-string.
+    const big = 'y '.repeat(1_000_000);
+    const proj = {
+      output: 'tiny',
+      context: { task: 'do a thing', artifacts: { a: big, b: big } },
+    };
+    const capped = applyTokenCap(proj, { maxInputTokens: 60 });
+    expect(capped.truncated).toBe(true);
+    expect(capped.inputTokens).toBeLessThanOrEqual(60);
+    for (const v of Object.values(capped.projection.context.artifacts)) {
+      expect(typeof v).toBe('string');
+    }
+  });
 });
 
 /** A free, deterministic mock backend — proves the full path with no tokens spent. */

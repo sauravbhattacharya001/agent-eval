@@ -209,7 +209,10 @@ export function applyTokenCap(
     const over = inputTokens - cap;
     const cur = artifacts[largest] ?? '';
     if (cur.length === 0) {
-      delete artifacts[largest];
+      // Drop an already-empty artifact so it can't be re-selected as `largest`
+      // forever (loop progress). Reflect.deleteProperty is the lint-clean
+      // equivalent of `delete` on a dynamically computed key.
+      Reflect.deleteProperty(artifacts, largest);
       truncated = true;
     } else {
       const dropChars = Math.min(cur.length, over * 4 + 8);

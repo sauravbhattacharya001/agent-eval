@@ -285,7 +285,160 @@ describe('AgentProvider', () => {
   });
 });
 
-// ─── TOOL BUILDER ───────────────────────────────────────────────────────────────
+// ─── BACKEND WIRE CONTRACT ──────────────────────────────────────────────────────
+// The OpenAI-compatible backends (Azure, Groq, OpenRouter) share one transport
+// helper. These tests pin each backend's URL / auth header / model field / error
+// label so that shared helper can never silently change a backend's wire shape.
+
+interface CapturedRequest {
+  url: string;
+  headers: Record<string, string>;
+  body: Record<string, unknown>;
+}
+
+/** Mock fetch that captures the outgoing request and returns a stub completion. */
+function captureFetch(): { calls: CapturedRequest[] } {
+  const calls: CapturedRequest[] = [];
+  globalThis.fetch = vi.fn(async (url: unknown, init: unknown) => {
+    const opts = init as { headers?: Record<string, string>; body?: string };
+    calls.push({
+      url: String(url),
+      headers: opts.headers ?? {},
+      body: opts.body ? JSON.parse(opts.body) : {},
+    });
+    return {
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }),
+    } as unknown as Response;
+  }) as unknown as typeof fetch;
+  return { calls };
+}
+
+describe('backend wire contract', () => {
+  describe('azure-openai', () => {
+    it('targets the deployment URL, sends api-key, and omits model from the body', async () => {
+      const cap = captureFetch();
+      const provider = new AgentProvider({
+        llm: {
+          type: 'azure-openai',
+          endpoint: 'https://test.openai.azure.com/', // trailing slash should be stripped
+          apiKey: 'azure-secret',
+          deployment: 'gpt-4o',
+          apiVersion: '2024-08-01-preview',
+        },
+      });
+
+      await provider.generate('hi');
+
+      const req = cap.calls[0]!;
+      expect(req.url).toBe(
+        'https://test.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-08-01-preview',
+      );
+      expect(req.headers['api-key']).toBe('azure-secret');
+      expect(req.headers['Authorization']).toBeUndefined();
+      // Azure carries the model in the URL (deployment), never in the body.
+      expect(req.body.model).toBeUndefined();
+      expect(req.body.temperature).toBe(0);
+    });
+
+    it('labels API errors as "Azure OpenAI"', async () => {
+      mockFetchError(401, 'bad key');
+      const provider = new AgentProvider({
+        llm: { type: 'azure-openai', endpoint: 'https://x.openai.azure.com', apiKey: 'k', deployment: 'd' },
+      });
+      const result = await provider.run('x');
+      expect(result.stopReason).toBe('error');
+      expect(result.error).toContain('Azure OpenAI API error 401');
+    });
+  });
+
+  describe('groq', () => {
+    it('targets the Groq URL, sends a Bearer token, and defaults the model', async () => {
+      const cap = captureFetch();
+      const provider = new AgentProvider({ llm: { type: 'groq', apiKey: 'groq-secret' } });
+
+      await provider.generate('hi');
+
+      const req = cap.calls[0]!;
+      expect(req.url).toBe('https://api.groq.com/openai/v1/chat/completions');
+      expect(req.headers['Authorization']).toBe('Bearer groq-secret');
+      expect(req.headers['api-key']).toBeUndefined();
+      expect(req.body.model).toBe('llama-3.3-70b-versatile');
+    });
+
+    it('honors an explicit model override', async () => {
+      const cap = captureFetch();
+      const provider = new AgentProvider({ llm: { type: 'groq', apiKey: 'k', model: 'mixtral-8x7b' } });
+      await provider.generate('hi');
+      expect(cap.calls[0]!.body.model).toBe('mixtral-8x7b');
+    });
+
+    it('labels API errors as "Groq"', async () => {
+      mockFetchError(500, 'boom');
+      const provider = new AgentProvider({ llm: { type: 'groq', apiKey: 'k' } });
+      const result = await provider.run('x');
+      expect(result.error).toContain('Groq API error 500');
+    });
+  });
+
+  describe('openrouter', () => {
+    it('targets the OpenRouter URL, sends a Bearer token, and defaults the model', async () => {
+      const cap = captureFetch();
+      const provider = new AgentProvider({ llm: { type: 'openrouter', apiKey: 'or-secret' } });
+
+      await provider.generate('hi');
+
+      const req = cap.calls[0]!;
+      expect(req.url).toBe('https://openrouter.ai/api/v1/chat/completions');
+      expect(req.headers['Authorization']).toBe('Bearer or-secret');
+      expect(req.body.model).toBe('anthropic/claude-sonnet-4');
+    });
+
+    it('labels API errors as "OpenRouter"', async () => {
+      mockFetchError(429, 'slow down');
+      const provider = new AgentProvider({ llm: { type: 'openrouter', apiKey: 'k' } });
+      const result = await provider.run('x');
+      expect(result.error).toContain('OpenRouter API error 429');
+    });
+  });
+
+  describe('shared body assembly', () => {
+    it('maps tools into the OpenAI function shape for every OpenAI-compatible backend', async () => {
+      const tool = defineTool('lookup')
+        .describe('Look something up')
+        .param('q', 'string', 'query', true)
+        .execute(async () => 'done');
+
+      for (const llm of [
+        { type: 'azure-openai' as const, endpoint: 'https://x.openai.azure.com', apiKey: 'k', deployment: 'd' },
+        { type: 'groq' as const, apiKey: 'k' },
+        { type: 'openrouter' as const, apiKey: 'k' },
+      ]) {
+        const cap = captureFetch();
+        const provider = new AgentProvider({ llm, tools: [tool] });
+        await provider.generate('hi');
+
+        const tools = cap.calls[0]!.body.tools as Array<{ type: string; function: { name: string } }>;
+        expect(tools).toHaveLength(1);
+        expect(tools[0]!.type).toBe('function');
+        expect(tools[0]!.function.name).toBe('lookup');
+      }
+    });
+
+    it('forwards max_tokens and temperature overrides to the body', async () => {
+      const cap = captureFetch();
+      const provider = new AgentProvider({ llm: { type: 'groq', apiKey: 'k' } });
+      await provider.generate('hi', { temperature: 0.7, maxTokens: 256 });
+      expect(cap.calls[0]!.body.temperature).toBe(0.7);
+      expect(cap.calls[0]!.body.max_tokens).toBe(256);
+    });
+  });
+});
+
+// ─── TOOL BUILDER ───────────────────────────────────────────────────────────────────────────
 
 describe('defineTool', () => {
   it('builds a complete tool definition', () => {

@@ -201,6 +201,21 @@ interface ChatCompletionResponse {
   };
 }
 
+/**
+ * Per-backend differences for an OpenAI-compatible chat completions call.
+ * Everything else (body assembly, tool mapping, timeout, error handling) is shared.
+ */
+interface OpenAICompatibleSpec {
+  /** Fully-resolved request URL. */
+  url: string;
+  /** Auth headers merged on top of `Content-Type: application/json`. */
+  authHeaders: Record<string, string>;
+  /** Model name to put in the body; omit for Azure (model lives in the URL). */
+  model?: string;
+  /** Human-readable backend label used in error messages. */
+  label: string;
+}
+
 // ─── AGENT PROVIDER ─────────────────────────────────────────────────────────────
 
 /**
@@ -512,163 +527,115 @@ export class AgentProvider implements EvalProvider {
   }
 
   /**
+   * Call an OpenAI-compatible chat completions endpoint.
+   *
+   * Azure OpenAI, Groq, and OpenRouter all speak the same wire protocol — the
+   * only differences are the URL, the auth header, and (for Groq/OpenRouter) a
+   * `model` field in the body. This shared transport keeps body assembly, tool
+   * mapping, timeout handling, and error reporting in ONE place so the three
+   * backends cannot drift apart.
+   */
+  private async callOpenAICompatible(
+    messages: ChatMessage[],
+    spec: OpenAICompatibleSpec,
+    llm: { temperature?: number; maxTokens?: number; timeoutMs?: number },
+    options?: ProviderOptions,
+  ): Promise<ChatCompletionResponse> {
+    // Build tool definitions for the API (identical OpenAI `function` shape).
+    const tools = this.config.tools && this.config.tools.length > 0
+      ? this.config.tools.map(t => ({
+          type: 'function' as const,
+          function: {
+            name: t.name,
+            description: t.description,
+            parameters: t.parameters,
+          },
+        }))
+      : undefined;
+
+    const body: Record<string, unknown> = {
+      messages,
+      temperature: options?.temperature ?? llm.temperature ?? 0,
+    };
+
+    // Azure carries the model in the URL (deployment); Groq/OpenRouter in the body.
+    if (spec.model !== undefined) body.model = spec.model;
+    if (tools) body.tools = tools;
+    if (options?.maxTokens ?? llm.maxTokens) body.max_tokens = options?.maxTokens ?? llm.maxTokens;
+
+    const timeoutMs = llm.timeoutMs ?? 60000;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(spec.url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...spec.authHeaders,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'unknown');
+        throw new Error(`${spec.label} API error ${response.status}: ${errorText}`);
+      }
+
+      return (await response.json()) as ChatCompletionResponse;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  /**
    * Call Azure OpenAI chat completions API.
    */
   private async callAzureOpenAI(messages: ChatMessage[], llm: AzureOpenAIBackendConfig, options?: ProviderOptions): Promise<ChatCompletionResponse> {
     const apiVersion = llm.apiVersion ?? '2024-08-01-preview';
     const url = `${llm.endpoint.replace(/\/$/, '')}/openai/deployments/${llm.deployment}/chat/completions?api-version=${apiVersion}`;
 
-    // Build tool definitions for the API
-    const tools = this.config.tools && this.config.tools.length > 0
-      ? this.config.tools.map(t => ({
-          type: 'function' as const,
-          function: {
-            name: t.name,
-            description: t.description,
-            parameters: t.parameters,
-          },
-        }))
-      : undefined;
-
-    const body: Record<string, unknown> = {
+    return this.callOpenAICompatible(
       messages,
-      temperature: options?.temperature ?? llm.temperature ?? 0,
-    };
-
-    if (tools) body.tools = tools;
-    if (options?.maxTokens ?? llm.maxTokens) body.max_tokens = options?.maxTokens ?? llm.maxTokens;
-
-    const timeoutMs = llm.timeoutMs ?? 60000;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'api-key': llm.apiKey,
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => 'unknown');
-        throw new Error(`Azure OpenAI API error ${response.status}: ${errorText}`);
-      }
-
-      return (await response.json()) as ChatCompletionResponse;
-    } finally {
-      clearTimeout(timeout);
-    }
+      { url, authHeaders: { 'api-key': llm.apiKey }, label: 'Azure OpenAI' },
+      llm,
+      options,
+    );
   }
 
   /**
    * Call Groq API (OpenAI-compatible).
    */
   private async callGroq(messages: ChatMessage[], llm: GroqBackendConfig, options?: ProviderOptions): Promise<ChatCompletionResponse> {
-    const model = llm.model ?? 'llama-3.3-70b-versatile';
-    const url = 'https://api.groq.com/openai/v1/chat/completions';
-
-    // Build tool definitions
-    const tools = this.config.tools && this.config.tools.length > 0
-      ? this.config.tools.map(t => ({
-          type: 'function' as const,
-          function: {
-            name: t.name,
-            description: t.description,
-            parameters: t.parameters,
-          },
-        }))
-      : undefined;
-
-    const body: Record<string, unknown> = {
-      model,
+    return this.callOpenAICompatible(
       messages,
-      temperature: options?.temperature ?? llm.temperature ?? 0,
-    };
-
-    if (tools) body.tools = tools;
-    if (options?.maxTokens ?? llm.maxTokens) body.max_tokens = options?.maxTokens ?? llm.maxTokens;
-
-    const timeoutMs = llm.timeoutMs ?? 60000;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${llm.apiKey}`,
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => 'unknown');
-        throw new Error(`Groq API error ${response.status}: ${errorText}`);
-      }
-
-      return (await response.json()) as ChatCompletionResponse;
-    } finally {
-      clearTimeout(timeout);
-    }
+      {
+        url: 'https://api.groq.com/openai/v1/chat/completions',
+        authHeaders: { 'Authorization': `Bearer ${llm.apiKey}` },
+        model: llm.model ?? 'llama-3.3-70b-versatile',
+        label: 'Groq',
+      },
+      llm,
+      options,
+    );
   }
 
   /**
    * Call OpenRouter API (OpenAI-compatible).
    */
   private async callOpenRouter(messages: ChatMessage[], llm: OpenRouterBackendConfig, options?: ProviderOptions): Promise<ChatCompletionResponse> {
-    const model = llm.model ?? 'anthropic/claude-sonnet-4';
-    const url = 'https://openrouter.ai/api/v1/chat/completions';
-
-    const tools = this.config.tools && this.config.tools.length > 0
-      ? this.config.tools.map(t => ({
-          type: 'function' as const,
-          function: {
-            name: t.name,
-            description: t.description,
-            parameters: t.parameters,
-          },
-        }))
-      : undefined;
-
-    const body: Record<string, unknown> = {
-      model,
+    return this.callOpenAICompatible(
       messages,
-      temperature: options?.temperature ?? llm.temperature ?? 0,
-    };
-
-    if (tools) body.tools = tools;
-    if (options?.maxTokens ?? llm.maxTokens) body.max_tokens = options?.maxTokens ?? llm.maxTokens;
-
-    const timeoutMs = llm.timeoutMs ?? 60000;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${llm.apiKey}`,
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => 'unknown');
-        throw new Error(`OpenRouter API error ${response.status}: ${errorText}`);
-      }
-
-      return (await response.json()) as ChatCompletionResponse;
-    } finally {
-      clearTimeout(timeout);
-    }
+      {
+        url: 'https://openrouter.ai/api/v1/chat/completions',
+        authHeaders: { 'Authorization': `Bearer ${llm.apiKey}` },
+        model: llm.model ?? 'anthropic/claude-sonnet-4',
+        label: 'OpenRouter',
+      },
+      llm,
+      options,
+    );
   }
 
   /**

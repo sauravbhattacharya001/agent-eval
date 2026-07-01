@@ -37,9 +37,10 @@ import {
 // Task decomposition and output segmentation — the two structural passes that
 // run before any drift scoring — live in a sibling module so this file stays
 // focused on the drift reasoning itself. The structural types they produce
-// (TaskRequirement, OutputSegment) are co-located with them and re-exported
-// below so the public surface is unchanged. See ./drift-segmentation.ts.
-import type { TaskRequirement, OutputSegment } from './drift-segmentation.js';
+// (TaskRequirement, OutputSegment) are co-located with them; TaskRequirement is
+// imported here for the summary signature, and both are re-exported below so the
+// public surface is unchanged. See ./drift-segmentation.ts.
+import type { TaskRequirement } from './drift-segmentation.js';
 import { decomposeTask, segmentOutput } from './drift-segmentation.js';
 // The detection pass — requirement→segment mapping and drift-pattern detection —
 // lives in a sibling module so this file stays focused on orchestration, scoring,
@@ -47,6 +48,17 @@ import { decomposeTask, segmentOutput } from './drift-segmentation.js';
 // the surface is unchanged; the marker tables and checkActionMatch it uses are
 // private to it (they had no other consumer). See ./drift-detection.ts.
 import { mapRequirementsToSegments, detectDriftIssues } from './drift-detection.js';
+// The drift type vocabulary (DriftKind, DriftIssue, DriftAnalysisOptions,
+// DriftAnalysisResult) lives in a leaf module so the sibling passes can depend on
+// it directly instead of importing back up into this orchestrator, and so the
+// type surface is importable without the engine. Re-exported below so the public
+// surface (`./drift.js`) is unchanged. See ./drift-types.ts.
+import type {
+  DriftKind,
+  DriftIssue,
+  DriftAnalysisOptions,
+  DriftAnalysisResult,
+} from './drift-types.js';
 
 // ═══ TYPES ═══════════════════════════════════════════════════════════════════════
 
@@ -60,86 +72,17 @@ export { decomposeTask, segmentOutput } from './drift-segmentation.js';
 // pass (./drift-detection.ts). Re-exported here so `checks/index.ts` (and the
 // public barrel) keep resolving them — and every consumer — from './drift.js'.
 export { mapRequirementsToSegments, detectDriftIssues } from './drift-detection.js';
+// The drift type vocabulary is defined in the leaf ./drift-types.ts. Re-exported
+// here so `checks/index.ts` (and the public barrel) keep resolving these types,
+// and every consumer, from './drift.js'.
+export type {
+  DriftKind,
+  DriftIssue,
+  DriftAnalysisOptions,
+  DriftAnalysisResult,
+} from './drift-types.js';
 
-/** Classification of a drift issue. */
-export type DriftKind =
-  | 'off-topic'          // Output is about a completely different subject
-  | 'wrong-action'       // Right subject, wrong action (review→rewrite, explain→fix)
-  | 'scope-creep'        // Addresses the task but also adds unrequested work
-  | 'partial-address'    // Only addresses part of the task, ignores the rest
-  | 'tangential'         // Related to the domain but doesn't address the task
-  | 'task-substitution'; // Answers a DIFFERENT but related question
-
-/** A specific drift issue found in the output. */
-export interface DriftIssue {
-  /** What kind of drift was detected. */
-  kind: DriftKind;
-  /** Human-readable description of the drift. */
-  description: string;
-  /** Severity of this drift (0–1). 1 = completely off-topic. */
-  severity: number;
-  /** Evidence from the output supporting this finding. */
-  evidence: string[];
-  /** Which segment(s) exhibit this drift (by index). */
-  segmentIndices: number[];
-  /** Which requirements are missed due to this drift. */
-  missedRequirements: number[];
-}
-
-/** Options for drift analysis. */
-export interface DriftAnalysisOptions {
-  /** Minimum relevance score for a segment to "address" a requirement. Default: 0.15 */
-  relevanceThreshold?: number;
-  /** Minimum proportion of requirements addressed to pass. Default: 0.6 */
-  coverageThreshold?: number;
-  /** Maximum proportion of output that can be tangential. Default: 0.4 */
-  maxTangentRatio?: number;
-  /** Whether to use judge backend for ambiguous cases. Default: false (rule-based only) */
-  useJudge?: boolean;
-  /** Judge backend to use for Tier 3 evaluation. */
-  judgeBackend?: JudgeBackend;
-  /** Judge options (thresholds, retries). */
-  judgeOptions?: JudgeOptions;
-  /** Custom action verbs to recognize in task decomposition. */
-  extraActionVerbs?: string[];
-}
-
-/** Full result of drift analysis. */
-export interface DriftAnalysisResult {
-  /** Whether the output is on-task (no significant drift). */
-  onTask: boolean;
-  /** Overall drift score (0 = perfectly on-task, 1 = completely off-topic). */
-  driftScore: number;
-  /** Confidence in the analysis (0–1). */
-  confidence: number;
-  /** Whether the verdict is "needs-human-review" due to low confidence. */
-  needsReview: boolean;
-  /** Requirements extracted from the task. */
-  requirements: TaskRequirement[];
-  /** Segments identified in the output. */
-  segments: OutputSegment[];
-  /** Proportion of requirements addressed (0–1). */
-  requirementCoverage: number;
-  /** Proportion of output text that's tangential (0–1). */
-  tangentRatio: number;
-  /** Specific drift issues found. */
-  issues: DriftIssue[];
-  /** Summary explanation. */
-  summary: string;
-  /** Judge result (if Tier 3 was used). */
-  judgeResult?: JudgeResult;
-  /** Analysis duration in ms. */
-  durationMs: number;
-}
-
-// ═══ CONSTANTS ══════════════════════════════════════════════════════════════════
-//
-// The scope-creep and task-substitution marker tables now live alongside the
-// detection pass that consumes them (./drift-detection.ts), since nothing else
-// referenced them. The built-in DRIFT_RUBRIC constant remains further below,
-// next to the judge wiring that uses it.
-
-// ═══ MAIN ANALYSIS ══════════════════════════════════════════════════════════════
+// ═══ ANALYSIS ═══════════════════════════════════════════════════════════════════
 
 /**
  * Perform full drift analysis on agent output against its assigned task.

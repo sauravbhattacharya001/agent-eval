@@ -32,7 +32,7 @@
 import type { TaskRequirement, OutputSegment } from './drift-segmentation.js';
 // Drift result/option types live with the analysis orchestration in ./drift.ts.
 // Imported type-only here so there is no runtime cycle (see module note above).
-import type { DriftIssue, DriftAnalysisOptions } from './drift.js';
+import type { DriftIssue, DriftAnalysisOptions } from './drift-types.js';
 // The TF-IDF cosine relevance scorer (internal helper) — see ./drift-relevance.ts.
 import { relevanceScore } from './drift-relevance.js';
 

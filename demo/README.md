@@ -72,3 +72,25 @@ all produced by the real, shipped package (`dist/`).
 ```bash
 rm demo/goldens/*.eval.mjs   # clear generated cases; re-run demo.mjs to regenerate
 ```
+
+---
+
+## Doing this for real (not just the demo)
+
+The demo wires the steps together by hand. In production, three CLI commands do it:
+
+```bash
+# 1. Scaffold a PRIVATE corpus (gitignore + SCRUBBING.md + secret scanner + CI gate):
+agent-eval init-corpus ./my-corpus
+
+# 2. Triage real traces and freeze the worst runs into regression cases:
+agent-eval triage ./raw/export.json --format otlp --promote-top 5 --to ./my-corpus/cases
+
+# 3. Sanitize each case (SCRUBBING.md), then gate on them forever:
+agent-eval run ./my-corpus/cases/
+```
+
+`init-corpus` also drops `.github/workflows/eval-gate.yml`, so once the corpus is a
+private repo, every push replays the whole corpus and a still-broken failure blocks
+the merge. That is the CI gate pointed at the corpus.
+

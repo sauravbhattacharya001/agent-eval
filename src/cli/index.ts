@@ -5,13 +5,19 @@
  */
 
 import { pathToFileURL } from 'node:url';
-import { readFile, stat, readdir } from 'node:fs/promises';
-import { join, basename } from 'node:path';
+import { readFile, stat, readdir, writeFile, mkdir } from 'node:fs/promises';
+import { join, basename, dirname, resolve as resolvePath } from 'node:path';
 import { runSuites } from '../core/runner.js';
 import { TerminalReporter, JsonReporter } from '../core/reporter.js';
 import { parseCliArgs } from './args.js';
+import type { ParsedArgs } from './args.js';
 import { discoverSpecs } from './discover.js';
 import { validateTranscript } from '../monitoring/contract.js';
+import { parseOtlp, parseLangSmith, parseAgentLens } from '../adapters/index.js';
+import { triageBuilt, renderTriageTable } from '../action/index.js';
+import type { BuiltSession } from '../adapters/index.js';
+import { corpusScaffold } from '../corpus/scaffold.js';
+import { promoteFromTriage } from '../corpus/promote.js';
 import type { EvalSuiteDefinition, Reporter } from '../core/types.js';
 
 function printHelp(): void {
@@ -20,6 +26,8 @@ agent-eval — Test and evaluate AI agent outputs
 
 Usage:
   agent-eval run <specs-dir|file>      Run eval specs from directory or file
+  agent-eval triage <trace> --format <fmt>   Triage a trace export; optionally promote failures
+  agent-eval init-corpus <dir>         Scaffold a private regression corpus
   agent-eval validate <file|dir>       Validate transcript(s) against the contract
   agent-eval --version                 Show version
   agent-eval --help                    Show this help
@@ -31,16 +39,21 @@ Options (run):
   --timeout, -t <ms>       Default timeout per spec (default: 30000)
   --concurrency, -c <n>    Max parallel specs (default: 1)
 
-Options (validate):
-  --json                   Emit machine-readable JSON instead of text
-  --finished               Require a finished transcript (IN-PROGRESS = error)
+Options (triage):
+  --format <otlp|langsmith|agentlens>   Trace format (required)
+  --promote-top <n>        Freeze the top-N flagged runs into regression cases
+  --to <dir>               Where to write promoted cases (default: ./cases)
+  --dollars-per-mtok <n>   Cost projection rate (default: 9)
+  --import-from <spec>     Import specifier promoted cases use (default: agent-eval)
+  --json                   Emit machine-readable JSON
 
 Examples:
   agent-eval run ./specs/
   agent-eval run ./specs/ --bail --filter "hallucination"
-  agent-eval validate ./transcripts/builder/2026-06-05-1000.md
+  agent-eval triage ./raw/export.json --format otlp
+  agent-eval triage ./raw/export.json --format otlp --promote-top 3 --to ./cases
+  agent-eval init-corpus ./my-corpus
   agent-eval validate ./transcripts/ --finished
-  agent-eval validate ./run.md --json
 `);
 }
 
@@ -92,6 +105,16 @@ async function main(): Promise<void> {
 
   if (parsed.command === 'validate') {
     await runValidate(parsed.paths, { json: parsed.json, finished: parsed.finished });
+    return;
+  }
+
+  if (parsed.command === 'init-corpus') {
+    await runInitCorpus(parsed.paths);
+    return;
+  }
+
+  if (parsed.command === 'triage') {
+    await runTriage(parsed);
     return;
   }
 
@@ -288,4 +311,134 @@ async function runValidate(
   }
 
   process.exit(failed > 0 ? 1 : 0);
+}
+
+/**
+ * `agent-eval init-corpus <dir>` - scaffold a private regression corpus with the
+ * scrub discipline baked in (gitignore, SCRUBBING.md, secret scanner, CI gate).
+ */
+async function runInitCorpus(paths: string[]): Promise<void> {
+  const target = paths[0];
+  if (!target) {
+    console.error('Usage: agent-eval init-corpus <dir>');
+    process.exit(1);
+    return;
+  }
+  const files = corpusScaffold();
+  let wrote = 0;
+  let skipped = 0;
+  for (const f of files) {
+    const dest = join(target, f.path);
+    await mkdir(dirname(dest), { recursive: true });
+    // Never clobber a file the user may have customized.
+    try {
+      await stat(dest);
+      skipped++;
+      continue;
+    } catch {
+      // does not exist -> write
+    }
+    await writeFile(dest, f.content, 'utf8');
+    wrote++;
+  }
+  console.log(`\u2705 Corpus scaffolded at ${target} (${wrote} file(s) written, ${skipped} existing left untouched).`);
+  console.log('\nNext:');
+  console.log(`  cd ${target} && git init && git add . && git commit -m "init corpus"`);
+  console.log('  # create a PRIVATE remote and push. Then feed it:');
+  console.log('  agent-eval triage ./raw/export.json --format otlp --promote-top 3 --to ./cases');
+  console.log('  # sanitize per SCRUBBING.md, then: node scripts/check-secrets.mjs && git commit');
+  process.exit(0);
+}
+
+/**
+ * `agent-eval triage <trace> --format <fmt> [--promote-top N --to <dir>]` -
+ * deterministic Tier-1 triage over a trace export; optionally freeze the worst
+ * runs into runnable regression cases (the promotion funnel).
+ */
+async function runTriage(parsed: ParsedArgs): Promise<void> {
+  const tracePath = parsed.paths[0];
+  if (!tracePath) {
+    console.error('Usage: agent-eval triage <trace> --format <otlp|langsmith|agentlens> [--promote-top N --to <dir>]');
+    process.exit(1);
+    return;
+  }
+  if (!parsed.format) {
+    console.error('Missing --format. One of: otlp | langsmith | agentlens');
+    process.exit(1);
+    return;
+  }
+
+  let text: string;
+  try {
+    text = await readFile(tracePath, 'utf8');
+  } catch {
+    console.error(`Trace file not found: ${tracePath}`);
+    process.exit(1);
+    return;
+  }
+
+  const parsers = { otlp: parseOtlp, langsmith: parseLangSmith, agentlens: parseAgentLens };
+  let sessions: BuiltSession[];
+  try {
+    sessions = parsers[parsed.format](text);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`Failed to parse ${parsed.format} trace: ${message}`);
+    process.exit(1);
+    return;
+  }
+
+  // AgentLens carries an explicit status verdict; consult it (staleOnly:false).
+  const staleOnly = parsed.format !== 'agentlens';
+  const report = triageBuilt(sessions, {
+    dollarsPerMillionTokens: parsed.dollarsPerMillionTokens ?? 9,
+    costlyTokenThreshold: 100_000,
+    staleOnly,
+  });
+
+  // Promotion funnel: freeze the worst N into regression cases. Compute this
+  // BEFORE emitting output so --json can fold the result into one JSON object
+  // (appending human text after the JSON blob would corrupt it for automation).
+  let promoted: ReturnType<typeof promoteFromTriage> = [];
+  let promoteDir: string | undefined;
+  if (parsed.promoteTop && parsed.promoteTop > 0) {
+    promoteDir = parsed.to ?? './cases';
+    // Default import is the package name (what an installed client corpus uses).
+    // A relative --import-from is resolved to an absolute path from CWD so the
+    // generated case doesn't depend on where --to happens to land.
+    let importFrom = parsed.importFrom ?? 'agent-eval';
+    if (importFrom.startsWith('.') || importFrom.startsWith('/')) {
+      importFrom = pathToFileURL(resolvePath(importFrom)).href;
+    }
+    promoted = promoteFromTriage(sessions, report, {
+      outDir: promoteDir,
+      top: parsed.promoteTop,
+      importFrom,
+    });
+  }
+
+  if (parsed.json) {
+    // Pure JSON on stdout: report plus any promotion result, nothing else.
+    const payload = promoteDir === undefined
+      ? report
+      : { report, promotion: { outDir: promoteDir, cases: promoted } };
+    console.log(JSON.stringify(payload, null, 2));
+  } else {
+    console.log(renderTriageTable(report, 15));
+    console.log(`\nScanned ${report.scanned} sessions \u2014 ${report.flagged} flagged (${report.costly} costly). Projected waste: $${report.projectedCostUsd.toFixed(0)} @ $${report.dollarsPerMillionTokens}/M tokens.`);
+    if (promoteDir !== undefined) {
+      if (promoted.length === 0) {
+        console.log('\nNothing flagged to promote \u2014 fleet is clean.');
+      } else {
+        console.log(`\nPromoted ${promoted.length} case(s) into ${promoteDir}:`);
+        for (const c of promoted) {
+          console.log(`  \u2022 ${basename(c.file)}  (${c.kind}, ~$${c.projectedCostUsd.toFixed(2)}, ${c.tokenUsage.toLocaleString()} tokens)`);
+        }
+        console.log('\nSANITIZE each case per SCRUBBING.md, then run scripts/check-secrets.mjs before committing.');
+      }
+    }
+  }
+
+  // Triage itself is a report, not a gate: exit 0. The corpus run is the gate.
+  process.exit(0);
 }

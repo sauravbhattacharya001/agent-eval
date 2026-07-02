@@ -15,7 +15,7 @@ export type {
   SessionMeta,
   SessionDescriptor,
   SessionSource,
-} from './openclaw.js';
+} from './types.js';
 
 // LangSmith / LangChain / LangGraph run-export adapter.
 export {

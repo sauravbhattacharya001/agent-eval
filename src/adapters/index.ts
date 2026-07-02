@@ -16,3 +16,13 @@ export type {
   SessionDescriptor,
   SessionSource,
 } from './openclaw.js';
+
+// LangSmith / LangChain / LangGraph run-export adapter.
+export {
+  parseLangSmith,
+  triageLangSmith,
+} from './langsmith.js';
+
+export type {
+  LangSmithRun,
+} from './langsmith.js';

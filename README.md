@@ -334,6 +334,28 @@ The scorecard answers *"is worker X healthy on average?"*. Triage answers the op
 
 Where transcripts are hand-authored `.md`, real fleets write raw `.jsonl` session logs. The **OpenClaw adapter** (`buildAllSessions` / `buildSession` / `listSessions`) converts those - reconciling bare logs, `.trajectory.jsonl` companions, and checkpoint snapshots into one `RunTimeline` per logical session - so triage runs straight off disk.
 
+Triage isn't OpenClaw-only. The **LangSmith adapter** (`triageLangSmith` / `parseLangSmith`) accepts a LangSmith run export - the JSON array of `Run` records emitted by `client.list_runs(...)` or the LangSmith UI's *Export* - and triages any LangChain / LangGraph agent with zero code changes. Runs sharing a `trace_id` collapse into one session; token usage is summed from leaf `llm` runs (avoiding the parent-chain rollup double-count); an unset `end_time` marks a run that never finished, and timeout/deadline language in `error` flags it as a `timeout`.
+
+```typescript
+import { triageLangSmith, renderTriageTable } from 'agent-eval';
+import { readFileSync } from 'node:fs';
+
+// A LangSmith export: `json.dump([r.dict() for r in client.list_runs(...)], f)`
+const report = triageLangSmith(readFileSync('./langsmith-export.json', 'utf8'), {
+  dollarsPerMillionTokens: 9,
+});
+console.log(renderTriageTable(report, 15));
+```
+
+```text
+Scanned 4 sessions — 2 failed (2 costly). Projected waste: $14 @ $9/M tokens.
+
+| # | Session  | Kind      | Duration | Tokens | ~$  | What went wrong |
+|---|----------|-----------|----------|--------|-----|-----------------|
+| 1 | 046893a4 | timeout   | 9m       | 1.3M   | $11 | idle/timeout abandon — never finished |
+| 2 | 55da498e | abandoned | 4m       | 305K   | $3  | aborted with no clean end |
+```
+
 ```typescript
 import { triageSessions, renderTriageTable } from 'agent-eval';
 
@@ -359,6 +381,8 @@ Scanned 2968 sessions — 88 failed (67 costly). Projected waste: $1826 @ $9/M t
 | `triageOne(session, opts)` | One session → a {@link TriageRow}, or `null` if it ran clean |
 | `renderTriageTable(report, n)` | Render the top-N failures as a Markdown table |
 | `buildAllSessions(dir)` | OpenClaw adapter: raw `.jsonl` → evaluable sessions |
+| `triageLangSmith(text, opts)` | LangSmith adapter: run-export JSON → ranked {@link TriageReport} |
+| `parseLangSmith(text)` | LangSmith run export → `BuiltSession[]` (one per trace) |
 
 | Option | Default | Description |
 |--------|---------|-------------|

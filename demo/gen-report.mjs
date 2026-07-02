@@ -53,8 +53,11 @@ const diagnoses = report.rows.map((r, i) => {
   const findings = (d.findings && d.findings.length)
     ? d.findings.map((f) => `  - ${f}`).join('\n')
     : '  - _(no deterministic issue lines)_';
+  const contradiction = (d.contradictions && d.contradictions.length)
+    ? '\n' + d.contradictions.map((c) => `- **[!] Contradiction:** ${c}`).join('\n')
+    : '';
   return `### ${i + 1}. \`${r.id}\` — ${r.kind} (~$${r.projectedCostUsd.toFixed(0)})
-
+${contradiction}
 - **Where it stopped:** ${where}
 - **Activity:** ${activity}
 - **Signals that fired:** ${signals}

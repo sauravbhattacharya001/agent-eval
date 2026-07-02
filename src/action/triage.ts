@@ -120,6 +120,12 @@ export interface TriageDiagnosis {
   signals: string[];
   /** The deterministic issue lines (`kind: message`) with any evidence. */
   findings: string[];
+  /**
+   * Self-report vs. measured-evidence contradictions: cases where a run's own
+   * status flags disagree with what its timeline actually shows (e.g. claims a
+   * timeout, but ended cleanly with no long silence). Empty when consistent.
+   */
+  contradictions: string[];
 }
 
 /** The full triage report for a sessions directory. */
@@ -215,6 +221,27 @@ function diagnose(
     i.evidence ? `${i.kind}: ${i.message} — ${i.evidence}` : `${i.kind}: ${i.message}`,
   );
 
+  // Self-report vs. measured-evidence contradictions. The timeline's own
+  // staleness bar is `maxGapMs` (default 5m); a longest gap well under it means
+  // the events do NOT support a "went quiet / timed out" story.
+  const STALE_GAP_MS = 300_000; // matches detectStaleness default maxGapMs
+  const contradictions: string[] = [];
+  const claimsTimeBased = meta.trajTimedOut || meta.trajIdle || meta.idleTimeoutErr;
+  const gap = result.longestGapMs;
+  const gapIsShort = Number.isFinite(gap) && gap < STALE_GAP_MS;
+  if (claimsTimeBased && result.hasEndEvent && gapIsShort) {
+    contradictions.push(
+      `self-report says timeout/idle, but the run reached an end event with only ` +
+      `${formatDuration(gap)} of silence (staleness bar is ${formatDuration(STALE_GAP_MS)}) ` +
+      `— the timing does not support a timeout; suspect a mislabeled trajectory flag`,
+    );
+  }
+  if (meta.trajFinalStatus === 'success' && (meta.trajError || meta.errorEvents > 0)) {
+    contradictions.push(
+      `self-report says finalStatus=success, but ${meta.errorEvents} error event(s) were logged`,
+    );
+  }
+
   return {
     lastEventType: meta.lastType,
     lastRole: meta.lastRole,
@@ -224,6 +251,7 @@ function diagnose(
     hadTrajectory: meta.hadTrajectory,
     signals,
     findings,
+    contradictions,
   };
 }
 

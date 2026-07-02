@@ -338,6 +338,8 @@ Triage isn't OpenClaw-only. The **LangSmith adapter** (`triageLangSmith` / `pars
 
 And the **OTLP adapter** (`triageOtlp` / `parseOtlp`) reads an OpenTelemetry trace export (`{ resourceSpans: [...] }`) using the GenAI semantic conventions - so *one* adapter covers every OpenTelemetry-native tracer: **Arize Phoenix, Traceloop / OpenLLMetry, and the raw OTel GenAI SDK**. Spans group into sessions by `gen_ai.conversation.id`; tokens come from `gen_ai.usage.*`; a `gen_ai.response.finish_reasons` of `length` / `max_tokens` (the model hit its cap) flags a `timeout`, and a span `status` of `STATUS_CODE_ERROR` or an `exception` event marks a failure.
 
+And the **AgentLens adapter** (`triageAgentLens` / `parseAgentLens`) reads an [AgentLens](https://github.com/sauravbhattacharya001) session export - the JSON its `SessionExporter.to_json()` emits (`{ session, stats, events }`) - closing the loop between the two tools: **AgentLens records the run, agent-eval grades it**, no glue code. Token totals and duration come straight from AgentLens's pre-computed `stats`; failure is read from `session.status` (`active` \| `completed` \| `error`). Because that status is richer than a raw-timeline gap, pass `staleOnly: false` for AgentLens so triage flags still-`active`/never-ended and `error` sessions via `!endedCleanly`.
+
 ```typescript
 import { triageLangSmith, renderTriageTable } from 'agent-eval';
 import { readFileSync } from 'node:fs';
@@ -387,6 +389,8 @@ Scanned 2968 sessions — 88 failed (67 costly). Projected waste: $1826 @ $9/M t
 | `parseLangSmith(text)` | LangSmith run export → `BuiltSession[]` (one per trace) |
 | `triageOtlp(text, opts)` | OTLP adapter: OpenTelemetry trace export → ranked {@link TriageReport} |
 | `parseOtlp(text)` | OTLP GenAI spans → `BuiltSession[]` (one per `gen_ai.conversation.id`) |
+| `triageAgentLens(text, opts)` | AgentLens adapter: session export → ranked {@link TriageReport} |
+| `parseAgentLens(text)` | AgentLens `{ session, stats, events }` → `BuiltSession[]` |
 
 | Option | Default | Description |
 |--------|---------|-------------|

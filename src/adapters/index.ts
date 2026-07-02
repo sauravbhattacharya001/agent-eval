@@ -36,3 +36,13 @@ export {
 export type {
   OtlpTrace,
 } from './otlp.js';
+
+// AgentLens session-export adapter - closes the loop with the AgentLens recorder.
+export {
+  parseAgentLens,
+  triageAgentLens,
+} from './agentlens.js';
+
+export type {
+  AgentLensExport,
+} from './agentlens.js';

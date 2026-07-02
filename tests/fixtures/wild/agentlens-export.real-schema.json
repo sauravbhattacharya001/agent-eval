@@ -1,0 +1,161 @@
+[
+  {
+    "session": {
+      "session_id": "als-clean-001",
+      "agent_name": "billing-agent",
+      "started_at": "2026-06-20T10:00:00+00:00",
+      "ended_at": "2026-06-20T10:00:12.500000+00:00",
+      "status": "completed",
+      "metadata": {}
+    },
+    "stats": {
+      "event_count": 2,
+      "total_tokens_in": 3000,
+      "total_tokens_out": 1200,
+      "total_tokens": 4200,
+      "models_used": {
+        "gpt-4o": 1
+      },
+      "tool_calls": 1,
+      "unique_tools": [
+        "send_email"
+      ],
+      "event_types": {
+        "llm_call": 1,
+        "tool_call": 1
+      },
+      "error_count": 0,
+      "total_event_duration_ms": 11800.0,
+      "session_duration_ms": 12500.0
+    },
+    "events": [
+      {
+        "event_id": "a3b2b98a36574432",
+        "session_id": "als-clean-001",
+        "event_type": "llm_call",
+        "timestamp": "2026-06-20T10:00:00Z",
+        "input_data": {
+          "prompt": "Summarize Q2 revenue and email finance."
+        },
+        "output_data": {
+          "text": "Done."
+        },
+        "model": "gpt-4o",
+        "tokens_in": 3000,
+        "tokens_out": 1200,
+        "duration_ms": 11000.0
+      },
+      {
+        "event_id": "05153a49d1b74320",
+        "session_id": "als-clean-001",
+        "event_type": "tool_call",
+        "timestamp": "2026-06-20T10:00:11Z",
+        "tokens_in": 0,
+        "tokens_out": 0,
+        "tool_call": {
+          "tool_call_id": "eaf031bd193a497a",
+          "tool_name": "send_email",
+          "tool_input": {},
+          "timestamp": "2026-07-02T03:32:56.999255Z"
+        },
+        "duration_ms": 800.0
+      }
+    ]
+  },
+  {
+    "session": {
+      "session_id": "als-timeout-002",
+      "agent_name": "scraper-agent",
+      "started_at": "2026-06-20T11:00:00+00:00",
+      "ended_at": null,
+      "status": "active",
+      "metadata": {}
+    },
+    "stats": {
+      "event_count": 1,
+      "total_tokens_in": 900000,
+      "total_tokens_out": 350000,
+      "total_tokens": 1250000,
+      "models_used": {
+        "gpt-4o": 1
+      },
+      "tool_calls": 0,
+      "unique_tools": [],
+      "event_types": {
+        "llm_call": 1
+      },
+      "error_count": 0,
+      "total_event_duration_ms": 560000.0,
+      "session_duration_ms": null
+    },
+    "events": [
+      {
+        "event_id": "22714008fc8f4e21",
+        "session_id": "als-timeout-002",
+        "event_type": "llm_call",
+        "timestamp": "2026-06-20T11:00:00Z",
+        "input_data": {
+          "prompt": "Scrape all 400 product pages and reconcile prices."
+        },
+        "model": "gpt-4o",
+        "tokens_in": 900000,
+        "tokens_out": 350000,
+        "duration_ms": 560000.0
+      }
+    ]
+  },
+  {
+    "session": {
+      "session_id": "als-error-003",
+      "agent_name": "research-agent",
+      "started_at": "2026-06-20T12:00:00+00:00",
+      "ended_at": "2026-06-20T12:04:30+00:00",
+      "status": "error",
+      "metadata": {}
+    },
+    "stats": {
+      "event_count": 2,
+      "total_tokens_in": 150000,
+      "total_tokens_out": 60000,
+      "total_tokens": 210000,
+      "models_used": {
+        "claude-3-5-sonnet": 1
+      },
+      "tool_calls": 0,
+      "unique_tools": [],
+      "event_types": {
+        "llm_call": 1,
+        "error": 1
+      },
+      "error_count": 1,
+      "total_event_duration_ms": 200000.0,
+      "session_duration_ms": 270000.0
+    },
+    "events": [
+      {
+        "event_id": "931dd8bf06414139",
+        "session_id": "als-error-003",
+        "event_type": "llm_call",
+        "timestamp": "2026-06-20T12:00:00Z",
+        "input_data": {
+          "prompt": "Find the CEO's direct email."
+        },
+        "model": "claude-3-5-sonnet",
+        "tokens_in": 150000,
+        "tokens_out": 60000,
+        "duration_ms": 200000.0
+      },
+      {
+        "event_id": "aafcae38b7984981",
+        "session_id": "als-error-003",
+        "event_type": "error",
+        "timestamp": "2026-06-20T12:04:00Z",
+        "output_data": {
+          "error": "ToolException: search API returned 500 after 3 retries"
+        },
+        "tokens_in": 0,
+        "tokens_out": 0
+      }
+    ]
+  }
+]

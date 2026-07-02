@@ -545,6 +545,8 @@ export type { Guard, GuardOptions, GuardVerdict, GuardStopKind } from './action/
 export { buildSession, buildAllSessions, listSessions } from './adapters/index.js';
 export { parseLangSmith, triageLangSmith } from './adapters/index.js';
 export { parseOtlp, triageOtlp } from './adapters/index.js';
+export { parseAgentLens, triageAgentLens } from './adapters/index.js';
 export type { BuiltSession, SessionMeta, SessionDescriptor, SessionSource } from './adapters/index.js';
 export type { LangSmithRun } from './adapters/index.js';
 export type { OtlpTrace } from './adapters/index.js';
+export type { AgentLensExport } from './adapters/index.js';

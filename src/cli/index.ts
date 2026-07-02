@@ -396,16 +396,13 @@ async function runTriage(parsed: ParsedArgs): Promise<void> {
     staleOnly,
   });
 
-  if (parsed.json) {
-    console.log(JSON.stringify(report, null, 2));
-  } else {
-    console.log(renderTriageTable(report, 15));
-    console.log(`\nScanned ${report.scanned} sessions \u2014 ${report.flagged} flagged (${report.costly} costly). Projected waste: $${report.projectedCostUsd.toFixed(0)} @ $${report.dollarsPerMillionTokens}/M tokens.`);
-  }
-
-  // Promotion funnel: freeze the worst N into regression cases.
+  // Promotion funnel: freeze the worst N into regression cases. Compute this
+  // BEFORE emitting output so --json can fold the result into one JSON object
+  // (appending human text after the JSON blob would corrupt it for automation).
+  let promoted: ReturnType<typeof promoteFromTriage> = [];
+  let promoteDir: string | undefined;
   if (parsed.promoteTop && parsed.promoteTop > 0) {
-    const outDir = parsed.to ?? './cases';
+    promoteDir = parsed.to ?? './cases';
     // Default import is the package name (what an installed client corpus uses).
     // A relative --import-from is resolved to an absolute path from CWD so the
     // generated case doesn't depend on where --to happens to land.
@@ -413,19 +410,32 @@ async function runTriage(parsed: ParsedArgs): Promise<void> {
     if (importFrom.startsWith('.') || importFrom.startsWith('/')) {
       importFrom = pathToFileURL(resolvePath(importFrom)).href;
     }
-    const promoted = promoteFromTriage(sessions, report, {
-      outDir,
+    promoted = promoteFromTriage(sessions, report, {
+      outDir: promoteDir,
       top: parsed.promoteTop,
       importFrom,
     });
-    if (promoted.length === 0) {
-      console.log('\nNothing flagged to promote \u2014 fleet is clean.');
-    } else {
-      console.log(`\nPromoted ${promoted.length} case(s) into ${outDir}:`);
-      for (const c of promoted) {
-        console.log(`  \u2022 ${basename(c.file)}  (${c.kind}, ~$${c.projectedCostUsd.toFixed(2)}, ${c.tokenUsage.toLocaleString()} tokens)`);
+  }
+
+  if (parsed.json) {
+    // Pure JSON on stdout: report plus any promotion result, nothing else.
+    const payload = promoteDir === undefined
+      ? report
+      : { report, promotion: { outDir: promoteDir, cases: promoted } };
+    console.log(JSON.stringify(payload, null, 2));
+  } else {
+    console.log(renderTriageTable(report, 15));
+    console.log(`\nScanned ${report.scanned} sessions \u2014 ${report.flagged} flagged (${report.costly} costly). Projected waste: $${report.projectedCostUsd.toFixed(0)} @ $${report.dollarsPerMillionTokens}/M tokens.`);
+    if (promoteDir !== undefined) {
+      if (promoted.length === 0) {
+        console.log('\nNothing flagged to promote \u2014 fleet is clean.');
+      } else {
+        console.log(`\nPromoted ${promoted.length} case(s) into ${promoteDir}:`);
+        for (const c of promoted) {
+          console.log(`  \u2022 ${basename(c.file)}  (${c.kind}, ~$${c.projectedCostUsd.toFixed(2)}, ${c.tokenUsage.toLocaleString()} tokens)`);
+        }
+        console.log('\nSANITIZE each case per SCRUBBING.md, then run scripts/check-secrets.mjs before committing.');
       }
-      console.log('\nSANITIZE each case per SCRUBBING.md, then run scripts/check-secrets.mjs before committing.');
     }
   }
 

@@ -28,6 +28,9 @@ for (const want of ['README.md', 'SCRUBBING.md', '.gitignore', 'cases/README.md'
 }
 ok(files.find((f) => f.path === '.gitignore').content.includes('raw/*'), 'gitignore blocks raw/ traces');
 ok(files.find((f) => f.path === 'scripts/check-secrets.mjs').content.includes('sk-'), 'scanner checks for OpenAI-style keys');
+ok(!!files.find((f) => f.path === 'package.json'), 'scaffold includes package.json (so cases can resolve agent-eval)');
+ok(files.find((f) => f.path === 'package.json').content.includes('"agent-eval"'), 'package.json depends on agent-eval');
+ok(files.find((f) => f.path === '.github/workflows/eval-gate.yml').content.includes('npm install'), 'CI gate installs deps before running cases');
 
 // ---- 2) promotion funnel ----------------------------------------------------
 const OUT = join('tests', '_corpus_tmp');
@@ -51,14 +54,52 @@ const body = readFileSync(worst.file, 'utf8');
 ok(body.includes(`sourceTraceId : ${worst.sourceId}`), 'case carries sourceTraceId provenance');
 ok(body.includes(`failureKind   : ${worst.kind}`), 'case carries failureKind provenance');
 ok(body.includes('EXPECTED TO FAIL'), 'case documents it is a red-until-fixed incident');
-ok(body.includes('toHaveMinLength(1)'), 'case asserts a non-empty final answer (structural, Tier 1)');
-ok(body.includes("from \"agent-eval\""), 'case imports the engine by package name for a client corpus');
+ok(body.includes('from "agent-eval"'), 'case imports the engine by package name for a client corpus');
 ok(readdirSync(OUT).every((f) => f.startsWith('regression-') && f.endsWith('.eval.mjs')), 'all outputs are regression-*.eval.mjs');
+
+// The failure kind determines the gating strategy:
+//   - no-final-answer (abandoned/stalled) -> assert a real answer exists
+//   - resource/error (timeout/runaway/errored) -> gate on a frozen incident flag,
+//     NOT the replayed text (which may be non-empty partial output).
+if (worst.kind === 'abandoned' || worst.kind === 'stalled') {
+  ok(body.includes('toHaveMinLength(1)'), 'no-answer case asserts a non-empty final answer (structural, Tier 1)');
+} else {
+  ok(body.includes('INCIDENT_RESOLVED = false'), 'resource/error case is red-by-construction via a frozen incident flag');
+  ok(!body.includes('toHaveMinLength(1),'), 'resource/error case does NOT green-wash on replayed non-empty output');
+}
+
+// ---- 3) anti-green-washing: a timeout with PARTIAL output must stay red -------
+// (the exact regression a reviewer caught: replaying non-empty partial text as
+//  success would flip a resource failure green on promotion.)
+const OUT2 = join('tests', '_corpus_tmp2');
+rmSync(OUT2, { recursive: true, force: true });
+const partialMeta = {
+  sessionId: 'partial-timeout', label: 'scrape a big site', cwd: null,
+  tokenUsage: 900_000, msgTokenMax: 0, trajTokenTotal: 0, hadTrajectory: false,
+  runtimeMs: 1, eventCount: 1, assistantCount: 1, errorEvents: 0,
+  sawAborted: false, cleanStop: false, idleTimeoutErr: false, trajIdle: false,
+  trajAborted: false, trajTimedOut: true, trajExternalAbort: false,
+  trajFinalStatus: null, trajError: false, abortedAny: true, endedCleanly: false,
+  lastType: null, lastRole: null,
+  allAssistantText: 'Working... step 1 done... step 2 in progress...', source: 'trajectory',
+};
+const partialSessions = [{ timeline: { events: [] }, meta: partialMeta }];
+const partialReport = {
+  scanned: 1, flagged: 1, costly: 1, costlyTokens: 900_000, projectedCostUsd: 8.1,
+  dollarsPerMillionTokens: 9,
+  rows: [{ id: 'partial-timeout', label: partialMeta.label, kind: 'timeout', issueKinds: [], tokenUsage: 900_000, projectedCostUsd: 8.1, summary: 'timeout' }],
+};
+const [partialCase] = promoteFromTriage(partialSessions, partialReport, { outDir: OUT2, top: 1, importFrom: 'agent-eval' });
+const partialBody = readFileSync(partialCase.file, 'utf8');
+ok(/const CAPTURED_OUTPUT = "[^"]+"/.test(partialBody), 'partial-timeout replayed a NON-empty output (the trap)');
+ok(partialBody.includes('INCIDENT_RESOLVED = false'), 'partial-timeout still gates on the frozen incident flag');
+ok(partialBody.includes('SOURCE_WASTED_TOKENS = 900000'), 'partial-timeout freezes the real measured burn');
+ok(!partialBody.includes('produced a usable final answer'), 'partial-timeout does NOT use the non-empty-output check that would pass');
+rmSync(OUT2, { recursive: true, force: true });
 
 // cleanup
 rmSync(OUT, { recursive: true, force: true });
 
-const total = 22;
 if (failures === 0) {
   console.log(`\n[corpus] ALL ASSERTIONS PASSED \u2705 \u2014 promotion funnel + scaffold work over a real trace`);
   process.exit(0);

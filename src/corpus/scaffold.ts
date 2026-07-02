@@ -187,7 +187,7 @@ const PATTERNS = [
   ['Phone (PII)',          /\b\+?\d[\d\s().\-]{9,}\d\b/],
   ['Connection string',    /\b(mongodb|postgres(ql)?|mysql|redis|amqp):\/\/[^\s"']+/i],
 ];
-const ALLOW = [/<REDACTED[_A-Z]*>/, /example\.com/];
+const ALLOW = [/<REDACTED[_A-Z]*>/g, /\bexample\.com\b/g];
 
 function walk(dir) {
   let out = [];
@@ -209,9 +209,13 @@ let hits = 0;
 for (const f of files) {
   const lines = readFileSync(f, 'utf8').split(/\r?\n/);
   lines.forEach((line, i) => {
-    if (ALLOW.some((a) => a.test(line))) return;
+    // Neutralize ONLY the known-safe spans (redaction placeholders, example.com),
+    // then scan what's left. A whole-line allow would let a real token hide next
+    // to a placeholder on the same line - so we blank the safe spans instead.
+    let scan = line;
+    for (const a of ALLOW) scan = scan.replace(a, ' ');
     for (const [name, re] of PATTERNS) {
-      const m = line.match(re);
+      const m = scan.match(re);
       if (m) {
         hits++;
         const s = m[0].length > 40 ? m[0].slice(0, 37) + '...' : m[0];
@@ -228,6 +232,21 @@ console.log('check-secrets: scanned ' + files.length + ' file(s), no obvious sec
 process.exit(0);
 `;
 
+const CORPUS_PACKAGE_JSON = `{
+  "name": "agent-eval-corpus",
+  "private": true,
+  "type": "module",
+  "description": "Private regression corpus: promoted, sanitized failure cases.",
+  "scripts": {
+    "check-secrets": "node scripts/check-secrets.mjs",
+    "gate": "node scripts/check-secrets.mjs && agent-eval run ./cases/"
+  },
+  "dependencies": {
+    "agent-eval": "latest"
+  }
+}
+`;
+
 const EVAL_GATE_WORKFLOW = `# Regression gate: replay the corpus on every push/PR.
 # A promoted failure that hasn't been fixed will fail this job and block the merge.
 name: eval-gate
@@ -242,6 +261,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Install agent-eval into the corpus tree. This is required: promoted cases
+      # 'import ... from "agent-eval"' (a bare specifier) and are dynamically
+      # imported from ./cases, so Node must resolve it from THIS repo's
+      # node_modules - an npx temp install is not on the cases' resolution path.
+      - name: install
+        run: npm install
 
       # Secret hygiene: never let an unscrubbed case reach the branch.
       - name: check-secrets
@@ -251,7 +280,7 @@ jobs:
       # Cases run offline via LocalProvider by default; swap providers to gate a
       # live agent. Exit non-zero (any red) fails the job.
       - name: run corpus
-        run: npx --yes agent-eval run ./cases/
+        run: npx agent-eval run ./cases/
 `;
 
 /** All files init-corpus writes, relative to the target corpus dir. */
@@ -260,6 +289,7 @@ export function corpusScaffold(): ScaffoldFile[] {
     { path: 'README.md', content: README },
     { path: 'SCRUBBING.md', content: SCRUBBING },
     { path: '.gitignore', content: GITIGNORE },
+    { path: 'package.json', content: CORPUS_PACKAGE_JSON },
     { path: 'cases/README.md', content: CASES_README },
     { path: 'cases/.gitkeep', content: '' },
     { path: 'raw/.gitkeep', content: '# raw traces stage here and are NEVER committed. See ../SCRUBBING.md\n' },

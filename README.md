@@ -284,13 +284,48 @@ toPassAdversarialJudge(backend, rubric)                // weakness-first, anti-i
 ```bash
 npx agent-eval run ./specs/                     # run eval specs (*.eval.ts / *.eval.js)
 npx agent-eval run ./specs/ --bail --filter "hallucination"
+npx agent-eval triage ./raw/export.json --format otlp   # triage a trace export (any stack)
+npx agent-eval triage ./raw/export.json --format otlp --promote-top 5 --to ./cases
+npx agent-eval init-corpus ./my-corpus          # scaffold a PRIVATE regression corpus
 npx agent-eval validate ./transcripts/          # validate transcript(s) against the contract
 npx agent-eval validate ./run.md --finished     # require a FINISHED transcript
 npx agent-eval --version
 npx agent-eval --help
 ```
 
-`run` options: `--bail/-b`, `--filter/-f <regex>`, `--reporter/-r terminal|json`, `--timeout/-t <ms>` (default 30000), `--concurrency/-c <n>` (default 1). `validate` options: `--json`, `--finished`.
+`run` options: `--bail/-b`, `--filter/-f <regex>`, `--reporter/-r terminal|json`, `--timeout/-t <ms>` (default 30000), `--concurrency/-c <n>` (default 1). `validate` options: `--json`, `--finished`. `triage` options: `--format otlp|langsmith|agentlens` (required), `--promote-top <n>`, `--to <dir>`, `--dollars-per-mtok <n>`, `--json`.
+
+## Trace triage → corpus (the promotion funnel)
+
+Your eval set should come from production, not imagination. This is the loop that
+mines real failures out of your traces and freezes them into a permanent regression
+corpus — works on **any** stack, because the adapters read OTLP (Phoenix / Traceloop
+/ OpenLLMetry / raw OTel), LangSmith, AgentLens, and OpenClaw.
+
+```bash
+# 1. Scaffold a PRIVATE corpus. Ships scrub discipline: .gitignore (raw traces never
+#    committed), SCRUBBING.md, a secret/PII scanner, and a CI gate workflow.
+agent-eval init-corpus ./my-corpus
+
+# 2. Triage real traces; freeze the worst-ranked failures into runnable cases.
+#    Ranked by wasted spend + failure kind (timeout / runaway / errored / abandoned).
+agent-eval triage ./raw/export.json --format otlp --promote-top 5 --to ./my-corpus/cases
+
+# 3. SANITIZE each generated case (SCRUBBING.md) — strip real content to <REDACTED_*>.
+#    Then gate on the corpus forever:
+agent-eval run ./my-corpus/cases/
+```
+
+Each promoted case replays the original **failing** output and is *expected to fail*
+until the agent is fixed — that red is the captured incident. Point its provider at
+your fixed agent and it goes green; the failure can never silently regress. Every
+case carries `sourceTraceId` + `failureKind` provenance back to the real run.
+
+**The corpus is private on purpose.** The engine (this repo) is the forkable part;
+your accumulated real failures are the part that isn't. `init-corpus` also drops
+`.github/workflows/eval-gate.yml`, so once the corpus is a private repo, every push
+replays it and a still-broken failure blocks the merge — the CI gate pointed at the
+corpus.
 
 ## Fleet Monitoring
 

@@ -1,0 +1,36 @@
+# CI for the agent-eval engine: build, adapter tests, and self-eval.
+# The corpus gate lives in a CLIENT corpus repo (scaffolded by `init-corpus`);
+# this workflow guards the engine itself.
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Build (strict tsc)
+        run: npm run build
+
+      # Adapters must survive the real SDK-emitted trace fixtures.
+      - name: Adapter tests (real trace shapes)
+        run: |
+          node tests/langsmith.test.mjs
+          node tests/otlp.test.mjs
+          node tests/agentlens.test.mjs
+
+      # The engine grades its own doc-example specs (offline, LocalProvider).
+      - name: Self-eval (example specs)
+        run: node dist/cli/index.js run ./examples/ || true
+
+      # Prove the promotion funnel + demo still runs end to end.
+      - name: Demo smoke (triage -> promote -> run)
+        run: node demo/demo.mjs

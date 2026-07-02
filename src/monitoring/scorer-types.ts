@@ -20,9 +20,11 @@ export type ScoreTier = 1 | 2;
 export type ScoreStatus = 'pass' | 'fail' | 'warn' | 'skip';
 
 /**
- * Canonical check identifiers the historical scorer emits. `relevance` is a
- * Tier-2 task-grounding signal produced by the single-run CI evaluator
- * ({@link ../action/ci-run}); the fleet transcript scorer emits the other three.
+ * Canonical check identifiers a scored transcript can carry. The fleet
+ * transcript scorer emits three of them - `staleness`, `completeness`, and
+ * `verification` (see `scorer-checks.ts`). `relevance` is a reserved Tier-2
+ * task-grounding identifier kept in the vocabulary for scores produced outside
+ * this scorer; the disk scorer here does not emit it.
  */
 export type CheckName =
   | 'staleness'

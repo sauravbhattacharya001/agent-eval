@@ -1,6 +1,10 @@
 # agent-eval
 
-A lightweight, zero-dependency TypeScript toolkit for evaluating AI agent outputs - in tests and across a production fleet. It is **post-hoc and report-only**: it reads what your agent already did and tells you what failed the process. It never gates a build and never edits your agent. A human reads the report and decides the fix (code or prompt), then feeds it back to the agent.
+A lightweight, zero-dependency TypeScript toolkit for evaluating AI agent outputs - in tests and across a production fleet. Its job is narrow and honest: **it reduces the search space and hands you diagnostic data.** It reads what your agent already did, finds the runs that failed the *process* - worst first - and tells you *where to look and what it knows* about each one. It stops there, on purpose.
+
+That matters because the evidence a fix needs lives in the **traces**, not the source: no amount of reading the code reveals that one run burned 1.3M tokens producing nothing and then *mislabeled its own failure*. A deterministic pass over the traces surfaces exactly that - shrinking "my agent is flaky, somewhere" down to "this run, this failure class, look here." What you do with that - a code change or a prompt change, by a human or a developer-agent - is your call.
+
+It is **post-hoc and report-only**: it never gates a build and never edits your agent. A human (or an agent) reads the report, decides the fix, and feeds it back to the agent, which then emits new traces - and the loop continues.
 
 Every surface is built on one idea - an **[independence-first tier pyramid](#the-tier-pyramid)**: prefer checks the agent *cannot forge* (did it crash? did it stall? does its claim match the real exit status?) and fall back to a model-as-judge only for genuine quality calls. The result is mostly deterministic, offline, and free, with paid judging reserved for the ~20% that needs it.
 
@@ -15,7 +19,7 @@ Every surface is built on one idea - an **[independence-first tier pyramid](#the
 
 It reads hand-authored transcripts *and* raw agent logs: an [OpenClaw session adapter](#fleet-triage-rank-failed-runs-by-cost) turns on-disk `.jsonl` sessions into evaluable timelines.
 
-> **Every surface is a report, never a gate.** These tools surface findings - a broken run, a slipping worker, a low-quality answer. They never block a merge and never stop an agent. The loop is closed by a human who reads the report and updates the agent, which then emits new traces, and so on.
+> **Every surface is a report, never a gate.** These tools surface findings - a broken run, a slipping worker, a low-quality answer - each with the evidence and enough diagnostic detail to *point you at the cause*. They never block a merge and never stop an agent. They shrink the haystack and hand over the needle's coordinates; the loop is closed by a human (or a developer-agent) who reads the report and updates the agent, which then emits new traces, and so on.
 >
 > **Triage vs. judge** - the two fleet tools are complementary: *triage* is free and catches **process** failure (the run broke, stalled, or ran away); *judge* is its paid counterpart for **correctness** (a run that finished cleanly but did the wrong thing). Use triage to find the wreckage, judge to grade the survivors.
 

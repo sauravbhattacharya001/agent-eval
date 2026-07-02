@@ -12,3 +12,4 @@ benchmarks/**/run-log.txt
 # Real OpenClaw session transcripts — never publish (PII/canaries). Local only.
 tests/fixtures/openclaw-sessions/
 
+demo/goldens/*.eval.mjs

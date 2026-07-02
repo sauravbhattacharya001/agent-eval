@@ -90,6 +90,36 @@ export interface TriageRow {
   costly: boolean;
   /** A one-line human summary of what went wrong. */
   summary: string;
+  /**
+   * Actionable diagnostics for a developer, all derived from real trace fields.
+   * Additive/optional so existing consumers and renderers are unaffected.
+   */
+  diagnosis?: TriageDiagnosis;
+}
+
+/**
+ * Per-row detail a developer can act on: where the run stopped, how long it
+ * went silent, which failure signals fired, and the raw issue evidence. Every
+ * field maps to an observed trace field - nothing is inferred beyond the
+ * deterministic checks that already ran.
+ */
+export interface TriageDiagnosis {
+  /** Last record type observed (e.g. `tool_call`, `output`), or null. */
+  lastEventType: string | null;
+  /** Role of the last message observed (e.g. `assistant`, `tool`), or null. */
+  lastRole: string | null;
+  /** Longest silent gap between events in ms (`NaN` if < 2 events). */
+  longestGapMs: number;
+  /** Total timeline events built. */
+  eventCount: number;
+  /** Assistant text segments captured. */
+  assistantCount: number;
+  /** Whether a trajectory companion was present (affects confidence). */
+  hadTrajectory: boolean;
+  /** Named failure signals that fired, in priority order. */
+  signals: string[];
+  /** The deterministic issue lines (`kind: message`) with any evidence. */
+  findings: string[];
 }
 
 /** The full triage report for a sessions directory. */
@@ -163,6 +193,40 @@ function summarize(row: Omit<TriageRow, 'summary'>): string {
 
 // ─── CORE ───────────────────────────────────────────────────────────────────────
 
+/**
+ * Build the actionable {@link TriageDiagnosis} for a row from the session meta
+ * and the staleness result. Pure mapping over already-observed fields.
+ */
+function diagnose(
+  meta: BuiltSession['meta'],
+  result: ReturnType<typeof analyzeStaleness>,
+): TriageDiagnosis {
+  // Named signals, most-actionable first. Each maps to a real observed flag.
+  const signals: string[] = [];
+  if (meta.trajExternalAbort) signals.push('external-abort (killed from outside)');
+  if (meta.idleTimeoutErr || meta.trajIdle) signals.push('idle-timeout (went quiet)');
+  if (meta.trajTimedOut) signals.push('hard-timeout (exceeded budget)');
+  if (meta.sawAborted || meta.trajAborted) signals.push('aborted (stopReason: aborted)');
+  if (meta.trajError || meta.trajFinalStatus === 'error') signals.push('final-status: error');
+  if (meta.errorEvents > 0) signals.push(`${meta.errorEvents} error event(s) in log`);
+  if (!meta.cleanStop && signals.length === 0) signals.push('no clean stop recorded');
+
+  const findings = result.issues.map((i) =>
+    i.evidence ? `${i.kind}: ${i.message} — ${i.evidence}` : `${i.kind}: ${i.message}`,
+  );
+
+  return {
+    lastEventType: meta.lastType,
+    lastRole: meta.lastRole,
+    longestGapMs: result.longestGapMs,
+    eventCount: meta.eventCount,
+    assistantCount: meta.assistantCount,
+    hadTrajectory: meta.hadTrajectory,
+    signals,
+    findings,
+  };
+}
+
 const EMPTY_BY_KIND = (): Record<FailureKind, number> => ({
   abandoned: 0,
   timeout: 0,
@@ -201,6 +265,7 @@ export function triageOne(built: BuiltSession, options: TriageOptions = {}): Tri
     runtimeMs,
     projectedCostUsd,
     costly,
+    diagnosis: diagnose(meta, result),
   };
   return { ...base, summary: summarize(base) };
 }

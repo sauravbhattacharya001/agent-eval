@@ -13,3 +13,6 @@ benchmarks/**/run-log.txt
 tests/fixtures/openclaw-sessions/
 
 demo/goldens/*.eval.mjs
+
+# Generated triage report artifacts (regenerate via demo/gen-report.mjs)
+reports/

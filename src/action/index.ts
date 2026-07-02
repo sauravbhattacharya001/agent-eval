@@ -25,6 +25,7 @@ export type {
   TriageOptions,
   TriageReport,
   TriageRow,
+  TriageDiagnosis,
   FailureKind,
 } from './triage.js';
 

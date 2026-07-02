@@ -35,6 +35,7 @@
 
 import type { RunEvent, RunTimeline } from '../checks/staleness.js';
 import type { BuiltSession, SessionMeta } from './types.js';
+import { toolSig } from './tool-signature.js';
 import { triageBuilt } from '../action/triage.js';
 import type { TriageOptions, TriageReport } from '../action/triage.js';
 
@@ -199,6 +200,7 @@ function buildTrace(traceId: string, runs: LangSmithRun[]): BuiltSession {
     events.push({ timestamp: startedMs, type: 'start', content: clip(root.name ?? traceId) });
   }
   const assistantTexts: string[] = [];
+  const toolCallSignatures: string[] = [];
   for (const r of runs) {
     const ts = toMs(r.start_time);
     if (r.error) {
@@ -206,6 +208,9 @@ function buildTrace(traceId: string, runs: LangSmithRun[]): BuiltSession {
     } else {
       const outText = clip(r.outputs);
       if (outText) assistantTexts.push(outText);
+      if (r.run_type === 'tool' || r.run_type === 'retriever') {
+        toolCallSignatures.push(toolSig(r.name, r.inputs));
+      }
       events.push({ timestamp: ts, type: eventType(r), content: outText });
     }
   }
@@ -248,6 +253,7 @@ function buildTrace(traceId: string, runs: LangSmithRun[]): BuiltSession {
     lastType: events.length ? (events[events.length - 1]?.type ?? null) : null,
     lastRole: null,
     allAssistantText: assistantTexts.join('\n'),
+    toolCallSignatures,
     source: 'trajectory',
   };
 

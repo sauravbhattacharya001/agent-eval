@@ -79,6 +79,14 @@ export interface SessionMeta {
   lastRole: string | null;
   /** All assistant text concatenated (for repetition/loop analysis). */
   allAssistantText: string;
+  /**
+   * Ordered per-tool-call signatures — `name(inputDigest)` — one entry per tool
+   * call the assistant issued, in order. Feeds the tool-loop half of the
+   * loop-without-progress check (mode #3): the same call fired N times is a
+   * thrash even when the assistant emits no repeated prose. Empty when the
+   * source cannot see per-call arguments (e.g. a coarse trajectory-only spine).
+   */
+  toolCallSignatures: string[];
   /** Which format this timeline was built from. */
   source: SessionSource;
 }

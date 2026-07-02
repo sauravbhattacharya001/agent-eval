@@ -34,6 +34,7 @@
 
 import type { RunEvent, RunTimeline } from '../checks/staleness.js';
 import type { BuiltSession, SessionMeta } from './types.js';
+import { toolSig } from './tool-signature.js';
 import { triageBuilt } from '../action/triage.js';
 import type { TriageOptions, TriageReport } from '../action/triage.js';
 
@@ -181,6 +182,7 @@ function buildSession(exp: AgentLensExport): BuiltSession {
   // Timeline.
   const events: RunEvent[] = [];
   const assistantTexts: string[] = [];
+  const toolCallSignatures: string[] = [];
   if (Number.isFinite(startMs)) events.push({ timestamp: startMs, type: 'start', content: sessionId });
   for (const e of evs) {
     const ts = toMs(e.timestamp);
@@ -191,6 +193,9 @@ function buildSession(exp: AgentLensExport): BuiltSession {
       if (text) assistantTexts.push(text);
       // Carry an AgentLens reasoning field through, if present.
       if (e.tool_call?.reasoning) assistantTexts.push(`reasoning: ${clip(e.tool_call.reasoning)}`);
+      if (e.event_type === 'tool_call' && e.tool_call) {
+        toolCallSignatures.push(toolSig(e.tool_call.tool_name, e.tool_call.tool_input));
+      }
       events.push({ timestamp: ts, type: mapEventType(e.event_type), content: text });
     }
   }
@@ -231,6 +236,7 @@ function buildSession(exp: AgentLensExport): BuiltSession {
     lastType: events.length ? (events[events.length - 1]?.type ?? null) : null,
     lastRole: null,
     allAssistantText: assistantTexts.join('\n'),
+    toolCallSignatures,
     source: 'trajectory',
   };
 

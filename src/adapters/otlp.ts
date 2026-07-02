@@ -35,6 +35,7 @@
 
 import type { RunEvent, RunTimeline } from '../checks/staleness.js';
 import type { BuiltSession, SessionMeta } from './types.js';
+import { toolSig } from './tool-signature.js';
 import { triageBuilt } from '../action/triage.js';
 import type { TriageOptions, TriageReport } from '../action/triage.js';
 
@@ -137,6 +138,10 @@ interface NormSpan {
   conversationId: string | undefined;
   op: string;
   model: string;
+  /** Tool identity for `execute_tool` spans (OTel GenAI); empty otherwise. */
+  toolName: string;
+  /** Raw tool arguments if the exporter recorded them; `undefined` if not. */
+  toolArgs: unknown;
 }
 
 function normSpan(span: OtlpSpan): NormSpan {
@@ -164,6 +169,21 @@ function normSpan(span: OtlpSpan): NormSpan {
     }
   }
 
+  const op = String(a.get('gen_ai.operation.name') ?? '');
+  // OTel GenAI tool spans: prefer the semantic tool name, fall back to the
+  // code.function.* convention, then the raw span name. Arguments live under a
+  // few vendor spellings — take the first one the exporter actually recorded.
+  const toolName = String(
+    a.get('gen_ai.tool.name') ?? a.get('code.function.name') ?? '',
+  );
+  const toolArgs =
+    a.get('gen_ai.tool.call.arguments') ??
+    a.get('gen_ai.tool.arguments') ??
+    a.get('gen_ai.tool.input') ??
+    a.get('tool.arguments') ??
+    a.get('code.function.arguments') ??
+    undefined;
+
   return {
     name: span.name ?? '(span)',
     startMs: nanoToMs(span.startTimeUnixNano),
@@ -175,8 +195,10 @@ function normSpan(span: OtlpSpan): NormSpan {
     conversationId:
       (a.get('gen_ai.conversation.id') as string | undefined) ??
       (a.get('session.id') as string | undefined),
-    op: String(a.get('gen_ai.operation.name') ?? ''),
+    op,
     model: String(a.get('gen_ai.request.model') ?? a.get('gen_ai.response.model') ?? ''),
+    toolName,
+    toolArgs,
   };
 }
 
@@ -213,6 +235,7 @@ function buildSession(sessionId: string, spans: NormSpan[]): BuiltSession {
 
   const events: RunEvent[] = [];
   const assistantTexts: string[] = [];
+  const toolCallSignatures: string[] = [];
   if (Number.isFinite(startMs)) events.push({ timestamp: startMs, type: 'start', content: sessionId });
   for (const s of spans) {
     const ts = Number.isFinite(s.startMs) ? s.startMs : startMs;
@@ -220,6 +243,12 @@ function buildSession(sessionId: string, spans: NormSpan[]): BuiltSession {
       events.push({ timestamp: ts, type: 'error', content: clip(s.exceptionMsg || `${s.name} errored`) });
     } else {
       const t = s.op === 'execute_tool' ? 'tool_call' : 'output';
+      // Signature on the semantic tool name + args when the exporter recorded
+      // them (OTel GenAI); fall back to the span name so "same tool ×N" is still
+      // caught even when args are absent.
+      if (s.op === 'execute_tool') {
+        toolCallSignatures.push(toolSig(s.toolName || s.name, s.toolArgs));
+      }
       events.push({ timestamp: ts, type: t, content: clip(s.name) });
       if (s.model) assistantTexts.push(`${s.name} (${s.model})`);
     }
@@ -266,6 +295,7 @@ function buildSession(sessionId: string, spans: NormSpan[]): BuiltSession {
     lastType: events.length ? (events[events.length - 1]?.type ?? null) : null,
     lastRole: null,
     allAssistantText: assistantTexts.join('\n') + (firstErr ? `\n${firstErr.exceptionMsg}` : ''),
+    toolCallSignatures,
     source: 'trajectory',
   };
 

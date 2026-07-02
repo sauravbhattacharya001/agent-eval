@@ -52,6 +52,7 @@ export type {
   SessionDescriptor,
 } from './types.js';
 import type { BuiltSession, SessionMeta, SessionDescriptor, SessionSource } from './types.js';
+import { toolSig } from './tool-signature.js';
 
 // ─── INTERNAL: trajectory parse result ──────────────────────────────────────────
 
@@ -101,6 +102,21 @@ function contentToText(content: unknown): string {
     }
   }
   return parts.join('\n');
+}
+
+/**
+ * Stable signature for one tool call: delegates to the shared {@link toolSig}
+ * so every adapter produces identical `name(inputDigest)` strings.
+ */
+function toolCallSignaturesOf(content: unknown): string[] {
+  if (!Array.isArray(content)) return [];
+  const out: string[] = [];
+  for (const block of content as ContentBlock[]) {
+    if (block && typeof block === 'object' && block.type === 'toolCall') {
+      out.push(toolSig(block.name, block.arguments));
+    }
+  }
+  return out;
 }
 
 /** Read a `.jsonl` file into parsed records, skipping malformed lines. */
@@ -228,6 +244,7 @@ function buildFromBare(barePath: string, base: string, trajPath: string | null):
   let label: string | null = null;
   let cwd: string | null = null;
   const assistantTexts: string[] = [];
+  const toolCallSignatures: string[] = [];
   let lastType: string | null = null;
   let lastRole: string | null = null;
 
@@ -286,6 +303,7 @@ function buildFromBare(barePath: string, base: string, trajPath: string | null):
         evType = 'tool_result';
       } else if (role === 'assistant') {
         if (text && text.trim()) assistantTexts.push(text);
+        if (hasToolCall) toolCallSignatures.push(...toolCallSignaturesOf(m.content));
         evType = hasToolCall ? 'tool_call' : 'output';
       } else {
         evType = 'output';
@@ -344,6 +362,7 @@ function buildFromBare(barePath: string, base: string, trajPath: string | null):
       lastType,
       lastRole,
       allAssistantText: allAssistant,
+      toolCallSignatures,
       source: 'bare',
     }),
   };
@@ -405,6 +424,9 @@ function buildFromTrajectory(trajPath: string, base: string): BuiltSession | nul
       lastType: hasEnd ? 'session.ended' : 'trace',
       lastRole: null,
       allAssistantText: allAssistant,
+      // Trajectory-only spine does not retain per-tool-call arguments, so we
+      // cannot build reliable signatures here — honest empty (see docstring).
+      toolCallSignatures: [],
       source: 'trajectory',
     }),
   };
@@ -434,6 +456,7 @@ interface MakeMetaArgs {
   lastType: string | null;
   lastRole: string | null;
   allAssistantText: string;
+  toolCallSignatures: string[];
   source: SessionSource;
 }
 
@@ -464,6 +487,7 @@ function makeMeta(a: MakeMetaArgs): SessionMeta {
     lastType: a.lastType,
     lastRole: a.lastRole,
     allAssistantText: a.allAssistantText,
+    toolCallSignatures: a.toolCallSignatures,
     source: a.source,
   };
 }

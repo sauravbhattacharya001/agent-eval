@@ -14,14 +14,14 @@ Every surface is built on one idea - an **[independence-first tier pyramid](#the
 |---------|---------------------|------|
 | **[Eval framework](#live-agent-evaluation)** | *Did this agent run do the thing?* - Jest/Vitest-style assertions over a live agent's output, run in tier order with auto short-circuit. | free → paid |
 | **[Fleet monitoring](#fleet-monitoring)** | *Is worker X healthy over time?* - score a directory of transcripts, track trends, roll up a health grade. | free |
-| **[Fleet triage](#fleet-triage-rank-failed-runs-by-cost)** | *Which runs failed expensively, worst first?* - rank broken runs by burned tokens and projected dollars, straight off raw `.jsonl` logs. | free |
+| **[Fleet triage](#fleet-triage-rank-failed-runs-by-cost)** | *Which runs failed expensively, worst first?* - rank broken **and** over-budget runs by burned tokens and projected dollars, straight off raw `.jsonl` logs. | free |
 | **[Fleet judge](#fleet-judge-offline-tier-3-second-opinion)** | *Did the finished runs actually do good work?* - a cost-capped Tier-3 second opinion over a fleet database. | paid |
 
 It reads hand-authored transcripts *and* raw agent logs: an [OpenClaw session adapter](#fleet-triage-rank-failed-runs-by-cost) turns on-disk `.jsonl` sessions into evaluable timelines.
 
 > **Every surface is a report, never a gate.** These tools surface findings - a broken run, a slipping worker, a low-quality answer - each with the evidence and enough diagnostic detail to *point you at the cause*. They never block a merge and never stop an agent. They shrink the haystack and hand over the needle's coordinates; the loop is closed by a human (or a developer-agent) who reads the report and updates the agent, which then emits new traces, and so on.
 >
-> **Triage vs. judge** - the two fleet tools are complementary: *triage* is free and catches **process** failure (the run broke, stalled, or ran away); *judge* is its paid counterpart for **correctness** (a run that finished cleanly but did the wrong thing). Use triage to find the wreckage, judge to grade the survivors.
+> **Triage vs. judge** - the two fleet tools are complementary: *triage* is free and catches two failure families - **process** failure (the run broke: abandoned, timed-out, ran away, stalled, errored) *and* the **finished-but-over-budget** class a crash check is blind to (a run that ended cleanly yet burned too many tokens, ran too long, took too many steps, or looped without progress); *judge* is its paid counterpart for **correctness** (a run that finished cleanly and within budget but did the *wrong* thing). Use triage to find the wreckage and the waste, judge to grade the survivors.
 
 ## Features
 
@@ -32,7 +32,7 @@ It reads hand-authored transcripts *and* raw agent logs: an [OpenClaw session ad
 - 📐 **Drift & staleness** - catch agents that sidetrack, stall, or produce nothing actionable
 - 🛰️ **Ground-truth verification** - cross-check a transcript's self-reported outcome against trusted orchestrator metadata
 - 🔌 **Raw-log adapter** - evaluate on-disk OpenClaw `.jsonl` sessions directly, not just curated transcripts
-- 💸 **Fleet triage** - rank the runs that failed expensively (abandoned / timed-out / runaway) by burned tokens and projected dollar cost
+- 💸 **Fleet triage** - rank runs that failed expensively by burned tokens and projected dollars, across two families: **process broke** (abandoned / timed-out / runaway / stalled / errored) and **finished-but-over-budget** (over-cost / over-latency / excessive-steps / loop-without-progress)
 - 🧑‍⚖️ **Fleet judge** - cost-capped offline Tier-3 second opinion over a fleet DB; weighs the recorded outcome so a polished-but-failed run can't score `pass` (a report, never a gate)
 - ✅ **Evidence, not verdicts** - every finding carries the evidence for what went wrong, for a human to act on
 
@@ -303,8 +303,10 @@ npx agent-eval --help
 ## Trace triage → report
 
 Your eval signal should come from production, not imagination. `triage` reads a trace
-export and reports, worst-first, which runs failed the **process** - timed out, ran
-away, aborted, stalled, errored - ranked by burned tokens and projected dollars. It
+export and reports, worst-first, which runs are worth looking at - the ones that broke the
+**process** (timed out, ran away, aborted, stalled, errored) *and* the ones that finished
+cleanly but blew a **budget** (over-cost, over-latency, excessive-steps, loop-without-progress) -
+ranked by burned tokens and projected dollars. It
 works on **any** stack, because the adapters read OTLP (Phoenix / Traceloop /
 OpenLLMetry / raw OTel), LangSmith, AgentLens, and OpenClaw.
 
@@ -366,13 +368,24 @@ console.log(card.grade);  // healthy | watch | at-risk | critical
 
 ## Fleet Triage (rank failed runs by cost)
 
-The scorecard answers *"is worker X healthy on average?"*. Triage answers the operational question: ***"which specific runs failed expensively, worst first?"*** It walks a directory of agent sessions, runs the deterministic staleness check on each, and emits one ranked row per run that broke - abandoned, timed-out, runaway, or stalled - annotated with the tokens it burned and a projected dollar cost on usage-based pricing. Deterministic and offline (no model-as-judge).
+The scorecard answers *"is worker X healthy on average?"*. Triage answers the operational question: ***"which specific runs failed expensively, worst first?"*** It walks a directory of agent sessions and emits one ranked row per run worth looking at, annotated with the tokens it burned and a projected dollar cost on usage-based pricing. Deterministic and offline (no model-as-judge).
+
+It catches **two** families. **Process broke** (via the deterministic staleness check): `abandoned`, `timeout`, `runaway`, `stalled`, `errored` - the run crashed, stalled, or ran away. And the **finished-but-over-budget** family a crash check is blind to *by construction* - a run that ended **cleanly** (exit status OK) yet wasted resources:
+
+| Kind | Fires when a cleanly-ended run… | Default threshold |
+|---|---|---|
+| `over-cost` | burned too many tokens | `overCostTokenThreshold` = 1,000,000 |
+| `over-latency` | ran too long wall-clock | `overLatencyMs` = 1,800,000 (30m) |
+| `excessive-steps` | took too many events/turns | `excessiveStepThreshold` = 400 |
+| `loop-without-progress` | repeated itself / thrashed | `loopRatioThreshold` = 0.5 |
+
+These are gated on the session's `endedCleanly` flag and **never borrow a staleness signal** - a clean run is invisible to staleness, so a resource budget is the only thing that can catch it. `loop-without-progress` scans **two** channels: repeated assistant **text** and repeated **tool-call signatures** (`name(args)`) - so the same failing command fired N times is caught even when no prose repeats. Arg-level signatures mean six `edit()` calls to six *different* files read as real work, not a loop; the evidence quotes the exact repeated call. The whole family is additive and defaults sit high enough that ordinary runs pass; set `includeCompleted: false` to disable it and get broken-only triage. Costed-waste (`costly` / the projected `$`) stays **token/runtime-based**, so a cheap looper is surfaced as a quality flag without inflating the dollar total.
 
 Where transcripts are hand-authored `.md`, real fleets write raw `.jsonl` session logs. The **OpenClaw adapter** (`buildAllSessions` / `buildSession` / `listSessions`) converts those - reconciling bare logs, `.trajectory.jsonl` companions, and checkpoint snapshots into one `RunTimeline` per logical session - so triage runs straight off disk.
 
 Triage isn't OpenClaw-only. The **LangSmith adapter** (`triageLangSmith` / `parseLangSmith`) accepts a LangSmith run export - the JSON array of `Run` records emitted by `client.list_runs(...)` or the LangSmith UI's *Export* - and triages any LangChain / LangGraph agent with zero code changes. Runs sharing a `trace_id` collapse into one session; token usage is summed from leaf `llm` runs (avoiding the parent-chain rollup double-count); an unset `end_time` marks a run that never finished, and timeout/deadline language in `error` flags it as a `timeout`.
 
-And the **OTLP adapter** (`triageOtlp` / `parseOtlp`) reads an OpenTelemetry trace export (`{ resourceSpans: [...] }`) using the GenAI semantic conventions - so *one* adapter covers every OpenTelemetry-native tracer: **Arize Phoenix, Traceloop / OpenLLMetry, and the raw OTel GenAI SDK**. Spans group into sessions by `gen_ai.conversation.id`; tokens come from `gen_ai.usage.*`; a `gen_ai.response.finish_reasons` of `length` / `max_tokens` (the model hit its cap) flags a `timeout`, and a span `status` of `STATUS_CODE_ERROR` or an `exception` event marks a failure.
+And the **OTLP adapter** (`triageOtlp` / `parseOtlp`) reads an OpenTelemetry trace export (`{ resourceSpans: [...] }`) using the GenAI semantic conventions - so *one* adapter covers every OpenTelemetry-native tracer: **Arize Phoenix, Traceloop / OpenLLMetry, and the raw OTel GenAI SDK**. Spans group into sessions by `gen_ai.conversation.id`; tokens come from `gen_ai.usage.*`; a `gen_ai.response.finish_reasons` of `length` / `max_tokens` (the model hit its cap) flags a `timeout`, and a span `status` of `STATUS_CODE_ERROR` or an `exception` event marks a failure. Tool-call signatures are read from `gen_ai.tool.name` (falling back to `code.function.name`) plus arguments from `gen_ai.tool.call.arguments` / `gen_ai.tool.input`, so the tool-loop check works on OTel spans too.
 
 And the **AgentLens adapter** (`triageAgentLens` / `parseAgentLens`) reads an [AgentLens](https://github.com/sauravbhattacharya001) session export - the JSON its `SessionExporter.to_json()` emits (`{ session, stats, events }`) - closing the loop between the two tools: **AgentLens records the run, agent-eval grades it**, no glue code. Token totals and duration come straight from AgentLens's pre-computed `stats`; failure is read from `session.status` (`active` \| `completed` \| `error`). Because that status is richer than a raw-timeline gap, pass `staleOnly: false` for AgentLens so triage flags still-`active`/never-ended and `error` sessions via `!endedCleanly`.
 
@@ -434,8 +447,14 @@ Scanned 2968 sessions — 88 failed (67 costly). Projected waste: $1826 @ $9/M t
 | `costlyTokenThreshold` | `200_000` | Tokens at/above which a failure is "costly" vs. a trivial error |
 | `costlyRuntimeMs` | `600_000` | Runtime (10m) that also marks a failure costly |
 | `staleOnly` | `true` | Only `isStale` runs (vs. any run that didn't end cleanly) |
+| `includeCompleted` | `true` | Also flag the finished-but-over-budget family on cleanly-ended runs; `false` = broken-only |
+| `overCostTokenThreshold` | `1_000_000` | A cleanly-ended run at/above this token count is `over-cost` |
+| `overLatencyMs` | `1_800_000` | A cleanly-ended run at/above this wall-clock (30m) is `over-latency` |
+| `excessiveStepThreshold` | `400` | A cleanly-ended run at/above this many events is `excessive-steps` |
+| `loopRatioThreshold` | `0.5` | Loop/repetition ratio at/above which a cleanly-ended run is `loop-without-progress` |
+| `loopMinSegments` | `4` | Minimum assistant segments / tool calls before the loop check can fire |
 
-Each `TriageRow` carries `id`, `label`, `kind` (`timeout` \| `abandoned` \| `runaway` \| `stalled` \| `errored`), `tokenUsage`, `runtimeMs`, `projectedCostUsd`, a `costly` flag, and a one-line `summary`. **Scope:** triage catches *process* failure (the run broke or ran away), not *correctness* (a run that finished cleanly but did the wrong thing) - that needs the Tier-3 judge.
+Each `TriageRow` carries `id`, `label`, `kind` (process: `timeout` \| `abandoned` \| `runaway` \| `stalled` \| `errored`; finished-but-over-budget: `over-cost` \| `over-latency` \| `excessive-steps` \| `loop-without-progress`), `tokenUsage`, `runtimeMs`, `projectedCostUsd`, a `costly` flag, an `issueKinds[]` list (every threshold the run tripped), and a one-line `summary`; the report also carries a `completedBad` count for the finished-but-over-budget rows. **Scope:** triage catches *process* failure **and** finished-but-over-budget waste (both deterministic, offline), but not *correctness* (a run that finished cleanly and within budget yet did the wrong thing) - that needs the Tier-3 judge.
 
 ## Fleet Judge (offline Tier-3 second opinion)
 

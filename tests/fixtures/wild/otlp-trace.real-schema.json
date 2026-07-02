@@ -125,6 +125,12 @@
                   }
                 },
                 {
+                  "key": "gen_ai.tool.call.arguments",
+                  "value": {
+                    "stringValue": "{\"to\":\"ops@example.com\",\"subject\":\"deploy done\"}"
+                  }
+                },
+                {
                   "key": "gen_ai.conversation.id",
                   "value": {
                     "stringValue": "conv-a"

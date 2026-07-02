@@ -35,5 +35,17 @@ const full = triageOtlp(text, { dollarsPerMillionTokens: 9, costlyTokenThreshold
 assert(full.flagged === 2, 'staleOnly:false surfaces conv-c too (2 flagged)');
 assert(full.rows.some(r => r.id === 'conv-c'), 'conv-c present when staleOnly:false');
 
+// ---- tool-call signatures now carry the semantic tool name + args (OTel GenAI) ----
+console.log('\n--- tool-call signatures ---');
+for (const s of sessions) {
+  if (s.meta.toolCallSignatures.length) console.log(`  ${s.meta.sessionId}:`, JSON.stringify(s.meta.toolCallSignatures));
+}
+const sigA = (byId['conv-a']?.toolCallSignatures) ?? [];
+assert(sigA.some(x => x.startsWith('send_email(')), 'conv-a tool sig uses gen_ai.tool.name (send_email), not the raw span name');
+assert(sigA.some(x => x.includes('ops@example.com') && x.includes('deploy done')), 'conv-a tool sig includes the recorded arguments (gen_ai.tool.call.arguments)');
+const sigC = (byId['conv-c']?.toolCallSignatures) ?? [];
+assert(sigC.length === 0, 'conv-c web_search threw (exception event) -> recorded as an ERROR, not a tool-loop signature');
+assert(byId['conv-c']?.errorEvents >= 1, 'conv-c surfaces via the error channel instead');
+
 console.log(fails === 0 ? '\nALL ASSERTIONS PASSED ✅ — OTLP adapter works on real OTel-emitted spans' : `\n${fails} FAILED ❌`);
 process.exit(fails === 0 ? 0 : 1);

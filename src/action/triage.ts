@@ -28,7 +28,8 @@
 
 import { analyzeStaleness } from '../checks/staleness.js';
 import type { StalenessIssue } from '../checks/staleness.js';
-import { buildAllSessions, type BuiltSession } from '../adapters/openclaw.js';
+import { buildAllSessions } from '../adapters/openclaw.js';
+import type { BuiltSession } from '../adapters/types.js';
 
 // ─── OPTIONS ────────────────────────────────────────────────────────────────────
 

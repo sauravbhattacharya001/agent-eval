@@ -33,7 +33,7 @@
  */
 
 import type { RunEvent, RunTimeline } from '../checks/staleness.js';
-import type { BuiltSession, SessionMeta } from './openclaw.js';
+import type { BuiltSession, SessionMeta } from './types.js';
 import { triageBuilt } from '../action/triage.js';
 import type { TriageOptions, TriageReport } from '../action/triage.js';
 

@@ -42,84 +42,16 @@ const LABEL_TRUNCATION = 120;
 
 // ─── PUBLIC TYPES ───────────────────────────────────────────────────────────────
 
-/** Which on-disk format a session timeline was built from. */
-export type SessionSource = 'bare' | 'trajectory';
-
-/**
- * Derived per-session signals that sit alongside the {@link RunTimeline}.
- *
- * The timeline feeds the deterministic checks; this metadata carries the extra
- * dimensions (token cost, abort provenance, clean-exit determination) a triage
- * or cost layer needs but that the timeline shape does not model.
- */
-export interface SessionMeta {
-  /** Session id (filename stem, no extension). */
-  sessionId: string;
-  /** Human label derived from the first real user line, or `'(no task line)'`. */
-  label: string;
-  /** Working directory if the bare log recorded one. */
-  cwd: string | null;
-  /** Best token count seen (max of bare `usage.totalTokens` and trajectory `usage.total`). */
-  tokenUsage: number;
-  /** Max per-message token total from the bare log. */
-  msgTokenMax: number;
-  /** Max cumulative token total from the trajectory trace. */
-  trajTokenTotal: number;
-  /** Whether a trajectory companion was present and parsed. */
-  hadTrajectory: boolean;
-  /** Wall-clock runtime in ms (`NaN` if timestamps are missing). */
-  runtimeMs: number;
-  /** Number of timeline events built. */
-  eventCount: number;
-  /** Number of assistant text segments captured. */
-  assistantCount: number;
-  /** Count of error events observed in the bare log. */
-  errorEvents: number;
-  /** Bare log saw a `stopReason: 'aborted'`. */
-  sawAborted: boolean;
-  /** Bare log saw an assistant `stopReason: 'stop'` (clean stop). */
-  cleanStop: boolean;
-  /** An idle-timeout error marker was detected. */
-  idleTimeoutErr: boolean;
-  /** Trajectory `idleTimedOut` flag. */
-  trajIdle: boolean;
-  /** Trajectory `aborted` flag. */
-  trajAborted: boolean;
-  /** Trajectory `timedOut` flag. */
-  trajTimedOut: boolean;
-  /** Trajectory `externalAbort` flag. */
-  trajExternalAbort: boolean;
-  /** Trajectory `finalStatus` (e.g. `'success' | 'error'`). */
-  trajFinalStatus: string | null;
-  /** Trajectory `finalStatus === 'error'`. */
-  trajError: boolean;
-  /** Any abort/idle/timeout/external/error signal across either source. */
-  abortedAny: boolean;
-  /** Whether the run reached a clean end (clean stop, no abort, no idle error). */
-  endedCleanly: boolean;
-  /** Type of the last record seen. */
-  lastType: string | null;
-  /** Role of the last message seen. */
-  lastRole: string | null;
-  /** All assistant text concatenated (for repetition/loop analysis). */
-  allAssistantText: string;
-  /** Which format this timeline was built from. */
-  source: SessionSource;
-}
-
-/** A built session: the timeline for the checks plus derived metadata. */
-export interface BuiltSession {
-  timeline: RunTimeline;
-  meta: SessionMeta;
-}
-
-/** A logical-session descriptor returned by {@link listSessions}. */
-export interface SessionDescriptor {
-  /** Session id (filename stem). */
-  id: string;
-  /** Explicit bare-file path when the representative is a checkpoint snapshot. */
-  bareOverride?: string;
-}
+// The normalized session contract lives in the neutral `./types.js` module so no
+// single trace source owns the shape all adapters must satisfy. Re-exported here
+// for backward compatibility with existing `./openclaw.js` type imports.
+export type {
+  SessionSource,
+  SessionMeta,
+  BuiltSession,
+  SessionDescriptor,
+} from './types.js';
+import type { BuiltSession, SessionMeta, SessionDescriptor, SessionSource } from './types.js';
 
 // ─── INTERNAL: trajectory parse result ──────────────────────────────────────────
 

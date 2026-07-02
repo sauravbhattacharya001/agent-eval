@@ -1,8 +1,8 @@
 # agent-eval — Client Demo
 
-A 3-minute, **offline** (no API key) demo of the full loop:
+A 2-minute, **offline** (no API key) demo of the core loop:
 
-> **Three trace formats → one triage pass → promote the worst run → a permanent regression case.**
+> **Three trace formats → one deterministic triage pass → one ranked, legible report.**
 
 Everything here runs against **real SDK-emitted traces** (OpenTelemetry, LangSmith, and
 AgentLens exports produced by each tool's own SDK — not hand-authored mocks).
@@ -16,7 +16,7 @@ npm run build
 node demo/demo.mjs
 ```
 
-That's the whole demo. It prints four labeled steps.
+That's the whole demo. It prints three labeled steps.
 
 ---
 
@@ -28,33 +28,28 @@ and AgentLens. Normally that's three silos and three parsers. Here, one ingest l
 all of them.
 
 **[2] One deterministic triage pass.**
-All 10 sessions ranked in a single table by **wasted spend + failure mode** — timeouts,
+All 10 sessions ranked in a single report by **wasted spend + failure mode** — timeouts,
 abandoned runs, token bonfires. No model, no API key: this is **Tier 1** evidence the agent
-can't forge (did it finish? did it error? how many tokens did it actually burn?). The table
+can't forge (did it finish? did it error? how many tokens did it actually burn?). The report
 shows ~$40 of waste the operator didn't know about.
 
-**[3] Promote the worst run.**
-The single most expensive failure (a 1.3M-token LangSmith timeout — *"Scrape all 400 product
-pages…"*) gets frozen into a **real, runnable** eval spec under `demo/goldens/`. Every case
-carries `sourceTraceId` provenance back to the incident.
-
-**[4] The loop is closed.**
-That generated case actually runs through the agent-eval CLI. It replays the original bad
-output, so it **fails on purpose** — that red *is* the captured incident, now a permanent
-regression test. Point the provider at the **fixed** agent and it turns green; the failure
-can never silently return.
+**[3] The report is the deliverable — a human closes the loop.**
+`agent-eval` is **post-hoc and report-only**. It stops at the report: it never edits your
+agent and never blocks a build. A human reads the findings, decides the fix (a code change
+or a prompt change), and feeds it back to the agent — which then emits new traces, and the
+loop continues. The report is legible on purpose, so a human (or an agent) can act on it.
 
 ---
 
 ## The one honest caveat (say it out loud)
 
 These traces are **real in shape** (emitted by each tool's real SDK) but were generated
-offline — there's no live-LLM run here because this box has no API key. The last mile is
-pointing step 3's promoted case at a **live provider** to test a real fixed agent. Swap
-`LocalProvider` for a live one in the generated `.eval.mjs` and it's a live regression gate.
+offline — there's no live-LLM run here because this box has no API key. The Tier-1/2 triage
+you see is the deterministic, offline part and runs for real. Tier 3 (the model-as-judge)
+would need a live model, which this box can't run.
 
-Nothing in this demo is faked: the triage numbers, the promotion, and the eval verdict are
-all produced by the real, shipped package (`dist/`).
+Nothing in this demo is faked: the triage numbers and the ranked report are all produced by
+the real, shipped package (`dist/`).
 
 ---
 
@@ -62,35 +57,19 @@ all produced by the real, shipped package (`dist/`).
 
 | File | Role |
 |---|---|
-| `demo.mjs` | The scripted 3-minute flow (steps 1–4). |
-| `promote.mjs` | The net-new closed-loop step: worst triaged run → real `.eval.mjs`. |
+| `demo.mjs` | The scripted 2-minute flow (steps 1–3). |
 | `traces/` | Real SDK-emitted trace exports (OTLP, LangSmith, AgentLens). |
-| `goldens/` | Where promoted regression cases land (generated; safe to delete + re-run). |
-
-## Reset
-
-```bash
-rm demo/goldens/*.eval.mjs   # clear generated cases; re-run demo.mjs to regenerate
-```
-
----
 
 ## Doing this for real (not just the demo)
 
-The demo wires the steps together by hand. In production, three CLI commands do it:
+In production it's one CLI command per trace export — analyze, read, act:
 
 ```bash
-# 1. Scaffold a PRIVATE corpus (gitignore + SCRUBBING.md + secret scanner + CI gate):
-agent-eval init-corpus ./my-corpus
-
-# 2. Triage real traces and freeze the worst runs into regression cases:
-agent-eval triage ./raw/export.json --format otlp --promote-top 5 --to ./my-corpus/cases
-
-# 3. Sanitize each case (SCRUBBING.md), then gate on them forever:
-agent-eval run ./my-corpus/cases/
+# Analyze real traces. Deterministic Tier 1/2 — no model, no cost, offline.
+# Add --json to pipe the report into your own tooling.
+agent-eval triage ./raw/export.json --format otlp
 ```
 
-`init-corpus` also drops `.github/workflows/eval-gate.yml`, so once the corpus is a
-private repo, every push replays the whole corpus and a still-broken failure blocks
-the merge. That is the CI gate pointed at the corpus.
-
+`triage` always exits 0. It is a report, not a gate: it surfaces the process failures,
+worst-first, with `sourceTraceId` provenance back to each real run. What you do about them —
+a code change or a prompt change — is your call. That open loop is the design.

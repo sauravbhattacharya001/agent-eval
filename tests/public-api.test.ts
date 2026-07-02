@@ -42,7 +42,7 @@ const PILLAR_FUNCTIONS = {
     'toNotRepeat',
   ],
   'pillar 1 — judge framework (Tier 3)': ['buildRubric', 'toPassJudge', 'computeVerdict'],
-  'pillar 1 — providers': ['LocalProvider', 'AzureOpenAIProvider', 'AgentProvider'],
+  'pillar 1 — providers': ['AzureOpenAIProvider', 'AgentProvider'],
   'pillar 2 — fleet monitoring': [
     'discoverTranscripts',
     'parseTranscript',
@@ -54,14 +54,12 @@ const PILLAR_FUNCTIONS = {
     'buildScorecard',
     'validateTranscript',
   ],
-  'pillar 3 — CI quality gate': [
-    'evaluateForAction',
-    'evaluateCiRun',
-    'runActionEval',
-    'emitActionResult',
-    'toActionOutputs',
-    'analyzeTaskGrounding',
-    'analyzeCiStaleness',
+  'pillar 3 — deterministic trace analysis (report, not a gate)': [
+    'triageBuilt',
+    'triageSessions',
+    'triageOne',
+    'renderTriageTable',
+    'createGuard',
   ],
   // Section F (agent-eval's unfrozen pillar) — harness×model selection, Tier 1+2
   // only. Slice 4 is the capstone that ranks a controlled sweep; pin its public
@@ -79,6 +77,10 @@ const PILLAR_FUNCTIONS = {
  *   anywhere) removed during a scope-reduction sweep.
  * - the chain.* family: the out-of-scope "fourth offering" prompt-chain runner,
  *   removed wholesale. Re-adding any of it is a scope regression.
+ * - LocalProvider + the CI-quality-gate / action layer: removed in the reframe
+ *   to a post-hoc, report-only tool. There is no gate; the loop is closed by a
+ *   human feeding fixes back to the agent. Re-adding any of these is a scope
+ *   regression against that thesis.
  */
 const REMOVED_NAMES = [
   'resolveProvider',
@@ -92,6 +94,26 @@ const REMOVED_NAMES = [
   'extractChainJson',
   'extractSection',
   'extractList',
+  // Removed provider primitive (replay-a-frozen-string): a false-free crutch.
+  'LocalProvider',
+  // Removed CI-quality-gate / action layer (pass/fail verdicts that blocked a
+  // merge). The tool reports; it does not gate.
+  'evaluateForAction',
+  'toActionOutputs',
+  'renderActionSummary',
+  'runActionEval',
+  'emitActionResult',
+  'runAndEmit',
+  'createEnvWriter',
+  'createMemoryWriter',
+  'scoreCiRun',
+  'evaluateCiRun',
+  'analyzeActionability',
+  'analyzeCiStaleness',
+  'analyzeTaskGrounding',
+  'parseCcaExecutionLog',
+  'extractCcaRun',
+  'extractCcaRunFromFile',
 ] as const;
 
 describe('public API surface (src/index.ts)', () => {

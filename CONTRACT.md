@@ -154,21 +154,21 @@ if (!res.valid) {
 }
 ```
 
-### Validation gates; scoring grades
+### Validation checks; scoring grades
 
 There are two distinct evaluation surfaces, and they answer different questions:
 
 | | `validate` (this contract) | `scoreTranscript` (quality monitoring) |
 |---|---|---|
 | Asks | *Is this a well-formed, finished transcript?* | *How good was the run?* |
-| Verdict | a **gate** — exit `0` / `1`; one error-severity violation fails | **gates** across deterministic, forge-proof checks |
-| Use | CI compliance bar | trend dashboards, regression spotting |
+| Verdict | binary — exit `0` / `1`; one error-severity violation fails | binary, forge-proof checks + a 0–1 score |
+| Use | a well-formedness check you can wire into CI | trend dashboards, regression spotting |
 
-Within `scoreTranscript`, every check is a **gate** — a deterministic signal the worker cannot forge after the fact:
+Within `scoreTranscript`, every check is a **binary, deterministic signal** the worker cannot forge after the fact:
 
-- **Gates** (`completeness`, `staleness`, `verification`) ask *did the agent do the thing?* — they may emit `fail`. A check that cannot run for a given transcript (e.g. `verification` with no run metadata) is emitted as `skip` and left out of the roll-up rather than counted against the score.
+- **Binary checks** (`completeness`, `staleness`, `verification`) ask *did the agent do the thing?* — they may emit `fail`. A check that cannot run for a given transcript (e.g. `verification` with no run metadata) is emitted as `skip` and left out of the roll-up rather than counted against the score.
 
-The `## Outcome` token in this contract (`pass`/`fail`/`partial`) is the **agent's own self-report** of the run â€” a *third* thing again, independent of both the validator and the scorer. The `verification` gate exists precisely to catch when that self-report disagrees with ground truth (the agent claims `pass` but the orchestrator recorded an error).
+The `## Outcome` token in this contract (`pass`/`fail`/`partial`) is the **agent's own self-report** of the run — a *third* thing again, independent of both the validator and the scorer. The `verification` check exists precisely to catch when that self-report disagrees with ground truth (the agent claims `pass` but the orchestrator recorded an error).
 
 ---
 
@@ -199,12 +199,13 @@ agent emit contract-compliant transcripts with no other tooling required.
 
 ---
 
-## CI gate (GitHub Actions)
+## Wiring `validate` into CI (GitHub Actions)
 
-Gate a pipeline on transcript compliance. `agent-eval validate` exits non-zero
-when any transcript has an error-severity violation, so it fails the job
-naturally. Use `--finished` in CI so a run that died mid-flight (left an
-`IN-PROGRESS` stub) fails loudly instead of passing silently.
+`agent-eval validate` is a well-formedness check, not a quality gate: it exits
+non-zero when any transcript has an error-severity violation, so you *can* wire
+it into CI to catch malformed or unfinished transcripts. Use `--finished` in CI
+so a run that died mid-flight (left an `IN-PROGRESS` stub) fails loudly instead
+of passing silently. This checks transcript *shape*, never agent quality.
 
 ```yaml
 # .github/workflows/transcripts.yml

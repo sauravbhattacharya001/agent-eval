@@ -45,9 +45,6 @@ export {
 export { TerminalReporter, JsonReporter } from './core/reporter.js';
 
 // Providers
-export { LocalProvider } from './providers/local.js';
-export type { LocalProviderConfig } from './providers/local.js';
-
 export { AzureOpenAIProvider } from './providers/azure-openai.js';
 export type { AzureOpenAIConfig } from './providers/azure-openai.js';
 
@@ -485,52 +482,7 @@ export type {
   SelectionScorecard,
 } from './monitoring/index.js';
 
-// GitHub Action Integration (Phase 4 — CI quality gate)
-export {
-  evaluateForAction,
-  toActionOutputs,
-  renderActionSummary,
-  runActionEval,
-  emitActionResult,
-  runAndEmit,
-  createEnvWriter,
-  createMemoryWriter,
-  scoreCiRun,
-  evaluateCiRun,
-  analyzeActionability,
-  analyzeCiStaleness,
-  analyzeTaskGrounding,
-  parseCcaExecutionLog,
-  extractCcaRun,
-  extractCcaRunFromFile,
-} from './action/index.js';
-export type {
-  GateGrade,
-  NoDataPolicy,
-  EvaluateForActionOptions,
-  WorkerVerdict,
-  ActionEvidence,
-  ActionEvaluation,
-  ActionOutputs,
-  ActionWriter,
-  MemoryWriter,
-  RunActionEvalOptions,
-  RunActionEvalResult,
-  CiCheckStatus,
-  CiCheckResult,
-  EvaluateCiRunOptions,
-  CiRunEvaluation,
-  ActionableArtifacts,
-  StalenessAnalysis,
-  TaskGroundingResult,
-  CcaContentItem,
-  CcaMessage,
-  CcaTurn,
-  CcaExecutionLog,
-  CcaResultDetails,
-  CcaRunExtract,
-  ExtractCcaRunOptions,
-} from './action/index.js';
+// Deterministic trace analysis (report, not a gate) + runtime guard
 export {
   triageSessions,
   triageBuilt,

@@ -1,6 +1,6 @@
 # agent-eval
 
-A lightweight, zero-dependency TypeScript toolkit for evaluating AI agent outputs - in tests, across a production fleet, and as a CI gate.
+A lightweight, zero-dependency TypeScript toolkit for evaluating AI agent outputs - in tests and across a production fleet. It is **post-hoc and report-only**: it reads what your agent already did and tells you what failed the process. It never gates a build and never edits your agent. A human reads the report and decides the fix (code or prompt), then feeds it back to the agent.
 
 Every surface is built on one idea - an **[independence-first tier pyramid](#the-tier-pyramid)**: prefer checks the agent *cannot forge* (did it crash? did it stall? does its claim match the real exit status?) and fall back to a model-as-judge only for genuine quality calls. The result is mostly deterministic, offline, and free, with paid judging reserved for the ~20% that needs it.
 
@@ -12,10 +12,11 @@ Every surface is built on one idea - an **[independence-first tier pyramid](#the
 | **[Fleet monitoring](#fleet-monitoring)** | *Is worker X healthy over time?* - score a directory of transcripts, track trends, roll up a health grade. | free |
 | **[Fleet triage](#fleet-triage-rank-failed-runs-by-cost)** | *Which runs failed expensively, worst first?* - rank broken runs by burned tokens and projected dollars, straight off raw `.jsonl` logs. | free |
 | **[Fleet judge](#fleet-judge-offline-tier-3-second-opinion)** | *Did the finished runs actually do good work?* - a cost-capped Tier-3 second opinion over a fleet database. | paid |
-| **[CI quality gate](#ci-quality-gate-github-action)** | *Should this job block?* - fail a GitHub Action on empty / stale / off-task output, or output that contradicts the run's real outcome. | free |
 
 It reads hand-authored transcripts *and* raw agent logs: an [OpenClaw session adapter](#fleet-triage-rank-failed-runs-by-cost) turns on-disk `.jsonl` sessions into evaluable timelines.
 
+> **Every surface is a report, never a gate.** These tools surface findings - a broken run, a slipping worker, a low-quality answer. They never block a merge and never stop an agent. The loop is closed by a human who reads the report and updates the agent, which then emits new traces, and so on.
+>
 > **Triage vs. judge** - the two fleet tools are complementary: *triage* is free and catches **process** failure (the run broke, stalled, or ran away); *judge* is its paid counterpart for **correctness** (a run that finished cleanly but did the wrong thing). Use triage to find the wreckage, judge to grade the survivors.
 
 ## Features
@@ -28,9 +29,8 @@ It reads hand-authored transcripts *and* raw agent logs: an [OpenClaw session ad
 - 🛰️ **Ground-truth verification** - cross-check a transcript's self-reported outcome against trusted orchestrator metadata
 - 🔌 **Raw-log adapter** - evaluate on-disk OpenClaw `.jsonl` sessions directly, not just curated transcripts
 - 💸 **Fleet triage** - rank the runs that failed expensively (abandoned / timed-out / runaway) by burned tokens and projected dollar cost
-- 🧑‍⚖️ **Fleet judge** - cost-capped offline Tier-3 second opinion over a fleet DB; weighs the recorded outcome so a polished-but-failed run can't score `pass` (signal, never a gate)
-- 🚦 **CI quality gate** - gate a GitHub Action on agent output quality (deterministic, offline)
-- ✅ **Clear pass/fail** - results carry evidence for what went wrong
+- 🧑‍⚖️ **Fleet judge** - cost-capped offline Tier-3 second opinion over a fleet DB; weighs the recorded outcome so a polished-but-failed run can't score `pass` (a report, never a gate)
+- ✅ **Evidence, not verdicts** - every finding carries the evidence for what went wrong, for a human to act on
 
 ## The Tier Pyramid
 
@@ -44,7 +44,7 @@ agent-eval is built on an **independence-first** hierarchy - prefer checks the a
 
 Most agent failures (stale runs, crashes, format violations, hallucinated paths, incomplete output) are catchable with **Tier 1+2 alone**. Model-as-judge handles the remaining ~20% - genuine subjective quality calls.
 
-> **Gate vs. grade:** a check either *gates* (binary "did the agent do the thing?") or *grades* (a 0–1 "how well?" score). A low grade is **information, not a failure** — never coerce a grade into a gate.
+> **Report, not gate:** every check produces *information* - did the agent do the thing, and how well? A finding is something a human reads and acts on; it never blocks a build and never coerces a low score into an automated failure. The tool reports; the human decides.
 
 ## Install
 
@@ -55,17 +55,21 @@ npm install agent-eval
 ## Quick Start
 
 ```typescript
-import { defineEval, toContain, toMatch, LocalProvider, runSuite, TerminalReporter } from 'agent-eval';
+import { defineEval, toContain, toMatch, runSuite, TerminalReporter } from 'agent-eval';
+import type { EvalProvider } from 'agent-eval';
 
-const provider = new LocalProvider({
-  outputs: {
-    'Write a function that reverses a string': `
-      function reverseString(input: string): string {
-        return input.split('').reverse().join('');
-      }
-    `,
+// A provider is anything with `generate(prompt) => Promise<string>`. In real use
+// this wraps your live agent (see AgentProvider); here it's a tiny fixed stub.
+const provider: EvalProvider = {
+  async generate(prompt) {
+    if (prompt.includes('reverses a string')) {
+      return `function reverseString(input: string): string {
+  return input.split('').reverse().join('');
+}`;
+    }
+    return '';
   },
-});
+};
 
 const suite = defineEval({
   name: 'Code generation quality',
@@ -189,7 +193,6 @@ const provider = new AgentProvider({
 | **Azure OpenAI** | `'azure-openai'` | `endpoint` + `apiKey` + `deployment` |
 | **OpenRouter** | `'openrouter'` | `apiKey` |
 
-**`LocalProvider`** - test against saved outputs (no API calls): `{ outputs, defaultOutput, substringMatch }`.
 **`AzureOpenAIProvider`** - single-shot completions (no tool loop): `{ endpoint, apiKey, deployment }`.
 
 Tool builder:
@@ -284,48 +287,42 @@ toPassAdversarialJudge(backend, rubric)                // weakness-first, anti-i
 ```bash
 npx agent-eval run ./specs/                     # run eval specs (*.eval.ts / *.eval.js)
 npx agent-eval run ./specs/ --bail --filter "hallucination"
-npx agent-eval triage ./raw/export.json --format otlp   # triage a trace export (any stack)
-npx agent-eval triage ./raw/export.json --format otlp --promote-top 5 --to ./cases
-npx agent-eval init-corpus ./my-corpus          # scaffold a PRIVATE regression corpus
+npx agent-eval triage ./raw/export.json --format otlp   # analyze a trace export (any stack)
 npx agent-eval validate ./transcripts/          # validate transcript(s) against the contract
 npx agent-eval validate ./run.md --finished     # require a FINISHED transcript
 npx agent-eval --version
 npx agent-eval --help
 ```
 
-`run` options: `--bail/-b`, `--filter/-f <regex>`, `--reporter/-r terminal|json`, `--timeout/-t <ms>` (default 30000), `--concurrency/-c <n>` (default 1). `validate` options: `--json`, `--finished`. `triage` options: `--format otlp|langsmith|agentlens` (required), `--promote-top <n>`, `--to <dir>`, `--dollars-per-mtok <n>`, `--json`.
+`run` options: `--bail/-b`, `--filter/-f <regex>`, `--reporter/-r terminal|json`, `--timeout/-t <ms>` (default 30000), `--concurrency/-c <n>` (default 1). `validate` options: `--json`, `--finished`. `triage` options: `--format otlp|langsmith|agentlens` (required), `--dollars-per-mtok <n>`, `--json`.
 
-## Trace triage → corpus (the promotion funnel)
+## Trace triage → report
 
-Your eval set should come from production, not imagination. This is the loop that
-mines real failures out of your traces and freezes them into a permanent regression
-corpus — works on **any** stack, because the adapters read OTLP (Phoenix / Traceloop
-/ OpenLLMetry / raw OTel), LangSmith, AgentLens, and OpenClaw.
+Your eval signal should come from production, not imagination. `triage` reads a trace
+export and reports, worst-first, which runs failed the **process** - timed out, ran
+away, aborted, stalled, errored - ranked by burned tokens and projected dollars. It
+works on **any** stack, because the adapters read OTLP (Phoenix / Traceloop /
+OpenLLMetry / raw OTel), LangSmith, AgentLens, and OpenClaw.
 
 ```bash
-# 1. Scaffold a PRIVATE corpus. Ships scrub discipline: .gitignore (raw traces never
-#    committed), SCRUBBING.md, a secret/PII scanner, and a CI gate workflow.
-agent-eval init-corpus ./my-corpus
+# Analyze real traces. Deterministic Tier 1/2 - no model, no cost, offline.
+agent-eval triage ./raw/export.json --format otlp
 
-# 2. Triage real traces; freeze the worst-ranked failures into runnable cases.
-#    Ranked by wasted spend + failure kind (timeout / runaway / errored / abandoned).
-agent-eval triage ./raw/export.json --format otlp --promote-top 5 --to ./my-corpus/cases
-
-# 3. SANITIZE each generated case (SCRUBBING.md) — strip real content to <REDACTED_*>.
-#    Then gate on the corpus forever:
-agent-eval run ./my-corpus/cases/
+# Machine-readable for your own tooling:
+agent-eval triage ./raw/export.json --format otlp --json
 ```
 
-Each promoted case replays the original **failing** output and is *expected to fail*
-until the agent is fixed — that red is the captured incident. Point its provider at
-your fixed agent and it goes green; the failure can never silently regress. Every
-case carries `sourceTraceId` + `failureKind` provenance back to the real run.
+This is **post-hoc and report-only**. `triage` never writes cases, never blocks a
+build, and never edits your agent - it always exits 0. Each row carries the run's
+`sourceTraceId` + `failureKind` provenance so you can find the real run. A human reads
+the findings and decides the fix (a code change or a prompt change), then feeds it
+back to the agent - which emits new traces, and the loop continues. The tool is one
+arc of that loop; the human is the other.
 
-**The corpus is private on purpose.** The engine (this repo) is the forkable part;
-your accumulated real failures are the part that isn't. `init-corpus` also drops
-`.github/workflows/eval-gate.yml`, so once the corpus is a private repo, every push
-replays it and a still-broken failure blocks the merge — the CI gate pointed at the
-corpus.
+> **Why report-only?** The fix for a failed run is a judgment call - is it a code bug
+> (a missing loop guard) or a prompt issue, or was it just an environmental blip? That
+> call belongs to a human. `triage` surfaces the *what*; it deliberately leaves the
+> *what to do about it* open.
 
 ## Fleet Monitoring
 
@@ -361,7 +358,7 @@ console.log(card.grade);  // healthy | watch | at-risk | critical
 | `detectTrendsFromDisk(dir, opts)` | Per-worker trend direction over a window |
 | `buildScorecard(dir, opts)` | Fleet health grade for the window |
 
-`scoreTranscript` also accepts `runMetadata` to cross-check a run's self-reported outcome against trusted orchestrator data - see [Verifying claims against ground truth](#ci-quality-gate-github-action).
+`scoreTranscript` also accepts `runMetadata` to cross-check a run's self-reported outcome against trusted orchestrator data - see [Verifying claims against ground truth](#verifying-claims-against-ground-truth).
 
 ## Fleet Triage (rank failed runs by cost)
 
@@ -438,7 +435,7 @@ Each `TriageRow` carries `id`, `label`, `kind` (`timeout` \| `abandoned` \| `run
 
 ## Fleet Judge (offline Tier-3 second opinion)
 
-Triage and judge are the two halves of fleet review (see [Triage vs. judge](#what-you-can-do-with-it)): triage is free and catches *process* failure; this is its paid counterpart for *correctness*. It runs the same [Tier-3 judging engine](#llm-judge-tier-3) used inside a suite, but at fleet scale: `fleet-judge` walks the sessions in an **AgentLens SQLite DB**, renders each to a transcript document, runs the model-as-judge, and writes a **labeled, non-scoring** annotation (`[Tier-3 judge - opinion, not evidence]`) back into the `annotations` table. It is a **signal, never a gate** - these annotations must never feed the real-time Tier-1+2 gate.
+Triage and judge are the two halves of fleet review (see [Triage vs. judge](#what-you-can-do-with-it)): triage is free and catches *process* failure; this is its paid counterpart for *correctness*. It runs the same [Tier-3 judging engine](#llm-judge-tier-3) used inside a suite, but at fleet scale: `fleet-judge` walks the sessions in an **AgentLens SQLite DB**, renders each to a transcript document, runs the model-as-judge, and writes a **labeled, non-scoring** annotation (`[Tier-3 judge - opinion, not evidence]`) back into the `annotations` table. It is a **signal, not evidence** - these labeled annotations are a second opinion for a human to weigh, and must never be fed back in as a deterministic Tier-1/2 input.
 
 ```bash
 # DRY-RUN by default - estimates tokens/cost, judges nothing, writes nothing
@@ -468,58 +465,9 @@ Why it doesn't get snowed by a *polished-but-false* final message (a run that ti
 
 The API key is read from `JUDGE_API_KEY` (preferred), else `GROQ_API_KEY` / `OPENROUTER_API_KEY` / `OPENAI_API_KEY` by provider. Uses Node's built-in `node:sqlite` - no external deps.
 
-## CI Quality Gate (GitHub Action)
+## Verifying claims against ground truth
 
-Most autonomous agents in CI only check *did the process exit 0?* - that catches a crash, but not a stale run, an empty review, or output that wandered off-task. The action adapter turns the monitoring scorecard into a **pass/fail gate**, deterministic and offline (Tier 1 + 2 only, **no model-as-judge**), so it adds no API cost or flake.
-
-**Fleet gate** - score a rolling window of transcripts, then block the job:
-
-```typescript
-import { runActionEval, emitActionResult } from 'agent-eval';
-
-const { evaluation } = runActionEval('./transcripts', {
-  window: 7,          // score the last 7 days of runs
-  gate: 'watch',      // healthy/watch pass; at-risk/critical fail
-  minScore: 0.6,      // optional fleet mean-score floor
-});
-process.exitCode = emitActionResult(evaluation);  // outputs + step summary + exit code
-```
-
-| Knob | Meaning |
-|------|---------|
-| `gate` | Worst health grade that still passes: `healthy` \| `watch` \| `at-risk` \| `critical` |
-| `minScore` | Optional fleet mean-score floor in `[0, 1]` |
-| `gateWorkers` | Restrict the gate to specific workers (others reported, never fail) |
-| `noData` | Treat workers with no evaluable runs: `pass` \| `fail` \| `ignore` (default `pass`) |
-| `window` | Rolling window (days) of transcripts to score |
-
-**Single-run gate** - *"did the agent address THIS prompt?"* for one PR / issue. `evaluateCiRun` scores a `{ prompt, output }` pair and returns the same `ActionEvaluation` shape:
-
-```typescript
-import { evaluateCiRun, emitActionResult } from 'agent-eval';
-
-const { evaluation } = evaluateCiRun({
-  prompt: prTitle + '\n\n' + prBody,   // the task the agent was given
-  output: claudeReviewComment,         // what it produced
-  worker: 'claude-review',
-});
-process.exitCode = emitActionResult(evaluation);
-```
-
-It runs two independent Tier-1 checks (no model-as-judge), and **either failing trips the gate**:
-
-- **Completeness** - is the output non-empty, substantive, and not a stub / truncation / refusal?
-- **Staleness** (the *no-op* detector) - did the run emit anything a human can **act on**? Counts concrete actionable artifacts (file refs, line numbers, code suggestions, directives) and flags bare acknowledgements ("LGTM"), verbatim reposts, and timeouts. It asks *"is there anything to act on?"*, never *"is it good?"*.
-
-| Knob | Meaning |
-|------|---------|
-| `minActionableArtifacts` | Min distinct artifact kinds to pass staleness (default `2`) |
-| `previousOutput` | Prior comment for this target; a verbatim repost is flagged as a no-op |
-| `timeline` | Optional run timeline; folds in timeout / abandonment detection |
-| `worker` | Logical name for the run (default `ci-run`) |
-| `action` | `gate` / `minScore` / `noData` forwarded to the gate (default gate `watch`) |
-
-**Verifying claims against ground truth** - transcript checks can't catch a transcript that is simply *wrong about its own run*. Pass a trusted orchestrator record as `runMetadata` and the scorer adds a Tier-1 `verification` check:
+Transcript checks can't catch a transcript that is simply *wrong about its own run*. Pass a trusted orchestrator record as `runMetadata` and the scorer adds a Tier-1 `verification` check:
 
 ```typescript
 import { scoreTranscript } from 'agent-eval';
@@ -530,7 +478,7 @@ const score = scoreTranscript(transcript, {
 // verification → fail: "claims pass but orchestrator recorded error"
 ```
 
-It flags three unfakeable mismatches: a finished outcome that contradicts the trusted exit status (hard fail), a "done" report while the run is still running (warn), and a self-reported duration that disagrees with measured wall-clock (warn). With no `runMetadata` the check **skips**.
+It flags three unfakeable mismatches: a finished outcome that contradicts the trusted exit status (hard fail), a "done" report while the run is still running (warn), and a self-reported duration that disagrees with measured wall-clock (warn). With no `runMetadata` the check **skips**. This is a *finding* on the scorecard - a human reads it and acts; nothing is blocked automatically.
 
 | `RunMetadata` field | Meaning |
 |------|---------|
@@ -538,10 +486,6 @@ It flags three unfakeable mismatches: a finished outcome that contradicts the tr
 | `exitCode` | Process exit code (`0` == success) |
 | `startedAt` / `endedAt` | Trusted wall-clock (ISO-8601 or epoch ms); absent `endedAt` ⇒ still running |
 | `durationMs` | Trusted measured duration; else derived from start/end |
-
-**`claude-code-action`** - the [action](https://github.com/anthropics/claude-code-action) writes a JSON execution log (`execution_file`); [`extractCcaRunFromFile`](src/action/cca-execution.ts) projects it into the `{ prompt, output, timeline }` `evaluateCiRun` expects, so a CI step can gate on what the agent produced.
-
-See the runnable examples in [`examples/`](examples/): `ci-eval.ts`, `ci-single-run.ts`, `cca-execution-eval.ts`, `github-action-eval.yml`, and [`workflows/pr-review-with-eval.yml`](examples/workflows/pr-review-with-eval.yml) (a copy-pasteable PR-review workflow that runs `claude-code-action`, gates the job on the eval step, and branches on `eval_passed`).
 
 ## Benchmark
 

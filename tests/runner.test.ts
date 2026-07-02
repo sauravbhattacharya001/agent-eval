@@ -1,19 +1,24 @@
 import { describe, it, expect } from 'vitest';
 import { runSuite, runSuites } from '../src/core/runner.js';
 import { toContain, toMatch, notToContain } from '../src/core/assertions.js';
-import { LocalProvider } from '../src/providers/local.js';
-import type { EvalSuiteDefinition } from '../src/core/types.js';
+import type { EvalProvider, EvalSuiteDefinition } from '../src/core/types.js';
 
-const provider = new LocalProvider({
-  outputs: {
+// Minimal fixture provider: replay a fixed map of prompt -> output. Keeps the
+// runner tests self-contained (no provider primitive dependency).
+function fixtureProvider(outputs: Record<string, string>, defaultOutput: string): EvalProvider {
+  return { generate: async (prompt: string) => outputs[prompt] ?? defaultOutput };
+}
+
+const provider = fixtureProvider(
+  {
     'Write a function that reverses a string': `function reverseString(input: string): string {
   return input.split('').reverse().join('');
 }`,
     'What is 2+2?': 'The answer is 4.',
     'Tell me about cats': 'Cats are wonderful pets that have been domesticated for thousands of years.',
   },
-  defaultOutput: 'I am a helpful assistant.',
-});
+  'I am a helpful assistant.',
+);
 
 describe('runner', () => {
   it('runs a suite with passing specs', async () => {

@@ -1,18 +1,16 @@
 /**
- * demo.mjs — the 3-minute client demo, end to end, offline (no API key).
+ * demo.mjs — the 2-minute client demo, end to end, offline (no API key).
  *
  * Story:
  *   1. Three production trace files, three different tools/formats.
- *   2. ONE triage pass ingests all of them → ranked table of wasted spend + failure mode.
- *   3. Promote the single worst run into a permanent, runnable regression case.
- *   4. That case now lives in the suite forever — the loop is closed.
+ *   2. ONE triage pass ingests all of them → ranked report of wasted spend + failure mode.
+ *   3. That report is the product. A human reads it and decides the fix.
  *
  * Run:  npm run build && node demo/demo.mjs
  */
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
 import {
   parseOtlp, parseLangSmith, parseAgentLens,
   triageBuilt, renderTriageTable,
@@ -49,46 +47,23 @@ console.log(renderTriageTable(report, 15));
 console.log(`\n    Projected waste across flagged runs: $${report.projectedCostUsd.toFixed(0)}`);
 console.log(`    Breakdown by failure kind: ${JSON.stringify(report.byKind)}`);
 
-// ── STEP 3: promote the worst run into a real regression case ────────────────
+// ── STEP 3: the report is the product — the human closes the loop ────────────
 console.log('\n' + bar());
-console.log('[3] Promote the WORST run into a permanent regression case.');
+console.log('[3] That report is the deliverable. The loop is closed by a human.');
 console.log(bar());
 const worst = report.rows[0];
 if (!worst) {
-  console.log('\n    Fleet is clean — nothing to promote. (In prod, this is the good day.)');
+  console.log('\n    Fleet is clean — nothing flagged. (In prod, this is the good day.)');
   process.exit(0);
 }
-// Find which source file that worst run came from, to feed the promoter.
-const owner = TRACES.find((t) => t.parse(readFileSync(join('demo', 'traces', t.file), 'utf8'))
-  .some((s) => s.meta.sessionId === worst.id));
 console.log(`\n    Worst offender: ${worst.id}  (${worst.kind}, ~$${worst.projectedCostUsd.toFixed(2)})`);
-console.log(`    Source: ${owner.tool}\n`);
-
-const promoteOut = execFileSync(process.execPath,
-  ['demo/promote.mjs', join('demo', 'traces', owner.file), owner.format],
-  { encoding: 'utf8' });
-console.log(promoteOut.split('\n').map((l) => '    ' + l).join('\n'));
-
-// ── STEP 4: prove the case is real by running the suite headlessly ───────────
-console.log('\n' + bar());
-console.log('[4] The frozen case is a REAL runnable eval. Running it now:');
-console.log(bar() + '\n');
-console.log('    (It replays the ORIGINAL bad output, so it FAILS on purpose —');
-console.log('     that red IS the captured incident. Point the provider at your');
-console.log('     fixed agent and it goes green.)\n');
-try {
-  const runOut = execFileSync(process.execPath,
-    ['dist/cli/index.js', 'run', 'demo/goldens/'],
-    { encoding: 'utf8', stdio: 'pipe' });
-  console.log(runOut.split('\n').map((l) => '    ' + l).join('\n'));
-} catch (e) {
-  // Non-zero exit is EXPECTED (the replayed incident fails). Show its output.
-  const out = (e.stdout || '') + (e.stderr || '');
-  console.log(out.split('\n').map((l) => '    ' + l).join('\n'));
-  console.log('    ↑ Expected red: the incident is now frozen as a test. Loop closed. ✅');
-}
+console.log('\n    agent-eval stops here, on purpose. It is post-hoc and report-only:');
+console.log('    it never edits your agent and never blocks a build. A human reads');
+console.log('    this, decides the fix (a code change or a prompt change), and feeds');
+console.log('    it back to the agent — which emits new traces, and the loop continues.');
+console.log('\n    The report is legible on purpose, so a human (or an agent) can act on it.');
 
 console.log('\n' + bar('═'));
-console.log(' Recap: 3 formats → 1 triage pass → worst run → permanent eval case.');
-console.log(' AgentLens records it · agent-eval grades it · adapters read any stack.');
+console.log(' Recap: 3 formats → 1 triage pass → one ranked, legible report.');
+console.log(' agent-eval reports the process failures · a human decides the fix.');
 console.log(bar('═') + '\n');

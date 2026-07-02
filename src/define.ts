@@ -13,7 +13,7 @@ import type { EvalSuiteDefinition } from './core/types.js';
  *
  * export default defineEval({
  *   name: 'My Agent Tests',
- *   provider: new LocalProvider({ outputs: { ... } }),
+ *   provider: new AzureOpenAIProvider({ deployment: 'gpt-4o' }),
  *   specs: [...]
  * });
  * ```

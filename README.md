@@ -336,6 +336,8 @@ Where transcripts are hand-authored `.md`, real fleets write raw `.jsonl` sessio
 
 Triage isn't OpenClaw-only. The **LangSmith adapter** (`triageLangSmith` / `parseLangSmith`) accepts a LangSmith run export - the JSON array of `Run` records emitted by `client.list_runs(...)` or the LangSmith UI's *Export* - and triages any LangChain / LangGraph agent with zero code changes. Runs sharing a `trace_id` collapse into one session; token usage is summed from leaf `llm` runs (avoiding the parent-chain rollup double-count); an unset `end_time` marks a run that never finished, and timeout/deadline language in `error` flags it as a `timeout`.
 
+And the **OTLP adapter** (`triageOtlp` / `parseOtlp`) reads an OpenTelemetry trace export (`{ resourceSpans: [...] }`) using the GenAI semantic conventions - so *one* adapter covers every OpenTelemetry-native tracer: **Arize Phoenix, Traceloop / OpenLLMetry, and the raw OTel GenAI SDK**. Spans group into sessions by `gen_ai.conversation.id`; tokens come from `gen_ai.usage.*`; a `gen_ai.response.finish_reasons` of `length` / `max_tokens` (the model hit its cap) flags a `timeout`, and a span `status` of `STATUS_CODE_ERROR` or an `exception` event marks a failure.
+
 ```typescript
 import { triageLangSmith, renderTriageTable } from 'agent-eval';
 import { readFileSync } from 'node:fs';
@@ -383,6 +385,8 @@ Scanned 2968 sessions — 88 failed (67 costly). Projected waste: $1826 @ $9/M t
 | `buildAllSessions(dir)` | OpenClaw adapter: raw `.jsonl` → evaluable sessions |
 | `triageLangSmith(text, opts)` | LangSmith adapter: run-export JSON → ranked {@link TriageReport} |
 | `parseLangSmith(text)` | LangSmith run export → `BuiltSession[]` (one per trace) |
+| `triageOtlp(text, opts)` | OTLP adapter: OpenTelemetry trace export → ranked {@link TriageReport} |
+| `parseOtlp(text)` | OTLP GenAI spans → `BuiltSession[]` (one per `gen_ai.conversation.id`) |
 
 | Option | Default | Description |
 |--------|---------|-------------|

@@ -26,3 +26,13 @@ export {
 export type {
   LangSmithRun,
 } from './langsmith.js';
+
+// OpenTelemetry (OTLP) GenAI-span adapter - covers Phoenix, Traceloop/OpenLLMetry, raw OTel.
+export {
+  parseOtlp,
+  triageOtlp,
+} from './otlp.js';
+
+export type {
+  OtlpTrace,
+} from './otlp.js';

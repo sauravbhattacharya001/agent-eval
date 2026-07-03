@@ -53,6 +53,48 @@ the real, shipped package (`dist/`).
 
 ---
 
+## Beyond "did it break?" — the finished-but-over-budget tier
+
+The demo's 10 sessions are all **process-broke** (timeouts + abandons — that's what these real
+exports happen to contain). But triage catches a second family a crash check is blind to *by
+construction*: runs that **ended cleanly** (exit status OK) yet **wasted resources**. Four kinds:
+
+| Kind | Fires when a cleanly-ended run… | Default |
+|---|---|---|
+| `over-cost` | burned too many tokens | ≥ 1,000,000 |
+| `over-latency` | ran too long wall-clock | ≥ 30m |
+| `excessive-steps` | took too many turns | ≥ 400 events |
+| `loop-without-progress` | repeated itself / thrashed | ratio ≥ 0.5 |
+
+A clean run is invisible to a staleness/crash check, so these budgets are the *only* thing
+that can catch it. The most interesting one is **`loop-without-progress`** — an agent that
+never times out and never errors, but spins. It scans **two** channels, and the evidence
+quotes the exact repeat (real output, from the test corpus — not from the 3 demo exports
+above):
+
+```text
+# repeated ASSISTANT TEXT — same sentence, cycling
+loop-without-progress: loop/repetition ratio 1.00 ≥ 0.5 over 6 segments
+  — cycle ×2 (3-segment) — "Let me check the build configuration to find the root cause "
+
+# repeated TOOL CALL — same failing command, fired back-to-back
+loop-without-progress: loop/repetition ratio 1.00 ≥ 0.5 over 7 segments
+  — tool `exec({"command":"npm test -- flaky.spec.ts"})` called ×6 of 6 (×6 back-to-back)
+```
+
+Two things make this trustworthy rather than noisy:
+
+- **Arg-level, not name-level.** Tool signatures are `name(args)`, so six `edit()` calls to
+  six *different* files read as real work — **not** a loop. Only genuinely repeated calls flag.
+- **Honest cost accounting.** A cheap looper is a **quality** flag (`completedBad`), *not*
+  counted as costly — so it never inflates the projected-dollar figure. The `$` stays about
+  real burned spend.
+
+Toggle it off with `includeCompleted: false` to get broken-only triage. It's fully additive:
+defaults sit high enough that ordinary clean runs pass untouched.
+
+---
+
 ## Files
 
 | File | Role |

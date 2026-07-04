@@ -32,14 +32,6 @@ import path from 'node:path';
 
 import type { RunEvent, RunTimeline } from '../checks/staleness.js';
 
-// ─── CONSTANTS ──────────────────────────────────────────────────────────────────
-
-/** Max characters retained per event `content` (keeps timelines small). */
-const CONTENT_TRUNCATION = 500;
-
-/** Max characters retained for a derived session label. */
-const LABEL_TRUNCATION = 120;
-
 // ─── PUBLIC TYPES ───────────────────────────────────────────────────────────────
 
 // The normalized session contract lives in the neutral `./types.js` module so no
@@ -53,6 +45,7 @@ export type {
 } from './types.js';
 import type { BuiltSession, SessionMeta, SessionDescriptor, SessionSource } from './types.js';
 import { toolSig } from './tool-signature.js';
+import { clip, LABEL_TRUNCATION } from './content-clip.js';
 
 // ─── INTERNAL: trajectory parse result ──────────────────────────────────────────
 
@@ -71,12 +64,6 @@ interface ParsedTrajectory {
 }
 
 // ─── HELPERS ────────────────────────────────────────────────────────────────────
-
-function clip(value: unknown, max = CONTENT_TRUNCATION): string {
-  if (value == null) return '';
-  const s = String(value);
-  return s.length > max ? s.slice(0, max) + '…' : s;
-}
 
 interface ContentBlock {
   type?: string;

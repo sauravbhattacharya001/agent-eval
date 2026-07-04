@@ -36,15 +36,12 @@
 import type { RunEvent, RunTimeline } from '../checks/staleness.js';
 import type { BuiltSession, SessionMeta } from './types.js';
 import { toolSig } from './tool-signature.js';
+import { clip, LABEL_TRUNCATION } from './content-clip.js';
 import { triageBuilt } from '../action/triage.js';
 import type { TriageOptions, TriageReport } from '../action/triage.js';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
-/** Max characters retained per event `content` (keeps timelines small). */
-const CONTENT_TRUNCATION = 500;
-/** Max characters retained for a derived session label. */
-const LABEL_TRUNCATION = 120;
 /** Error strings that indicate an explicit timeout/deadline rather than a generic fail. */
 const TIMEOUT_RE = /\b(timed?[\s_-]?out|timeout|deadline|deadline[\s_-]?exceeded|etimedout|read timed out)\b/i;
 
@@ -71,12 +68,6 @@ export interface LangSmithRun {
 }
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
-
-function clip(value: unknown, max = CONTENT_TRUNCATION): string {
-  if (value == null) return '';
-  const s = typeof value === 'string' ? value : JSON.stringify(value);
-  return s.length > max ? s.slice(0, max) + '…' : s;
-}
 
 /** Coerce an ISO string / epoch-ms / epoch-s into epoch ms, or NaN. */
 function toMs(t: string | number | null | undefined): number {

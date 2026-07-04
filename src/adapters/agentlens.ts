@@ -35,13 +35,9 @@
 import type { RunEvent, RunTimeline } from '../checks/staleness.js';
 import type { BuiltSession, SessionMeta } from './types.js';
 import { toolSig } from './tool-signature.js';
+import { clip, LABEL_TRUNCATION } from './content-clip.js';
 import { triageBuilt } from '../action/triage.js';
 import type { TriageOptions, TriageReport } from '../action/triage.js';
-
-// ─── CONSTANTS ────────────────────────────────────────────────────────────────
-
-const CONTENT_TRUNCATION = 500;
-const LABEL_TRUNCATION = 120;
 
 // ─── TYPES (the fields we read; extras ignored) ───────────────────────────────
 
@@ -87,12 +83,6 @@ export interface AgentLensExport {
 }
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
-
-function clip(value: unknown, max = CONTENT_TRUNCATION): string {
-  if (value == null) return '';
-  const s = typeof value === 'string' ? value : JSON.stringify(value);
-  return s.length > max ? s.slice(0, max) + '…' : s;
-}
 
 function toMs(t: string | null | undefined): number {
   if (!t) return NaN;

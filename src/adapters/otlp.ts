@@ -36,13 +36,12 @@
 import type { RunEvent, RunTimeline } from '../checks/staleness.js';
 import type { BuiltSession, SessionMeta } from './types.js';
 import { toolSig } from './tool-signature.js';
+import { clip, LABEL_TRUNCATION } from './content-clip.js';
 import { triageBuilt } from '../action/triage.js';
 import type { TriageOptions, TriageReport } from '../action/triage.js';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
-const CONTENT_TRUNCATION = 500;
-const LABEL_TRUNCATION = 120;
 /** finish_reason values that mean "hit the token cap" (OpenAI: length, Anthropic: max_tokens). */
 const CAP_FINISH = new Set(['length', 'max_tokens', 'model_length']);
 
@@ -117,12 +116,6 @@ function nanoToMs(nano: string | undefined): number {
   if (!nano) return NaN;
   const n = Number(nano);
   return Number.isFinite(n) ? Math.floor(n / 1e6) : NaN;
-}
-
-function clip(value: unknown, max = CONTENT_TRUNCATION): string {
-  if (value == null) return '';
-  const s = typeof value === 'string' ? value : JSON.stringify(value);
-  return s.length > max ? s.slice(0, max) + '…' : s;
 }
 
 // ─── SPAN → NORMALISED ────────────────────────────────────────────────────────

@@ -29,7 +29,6 @@ import type {
   OutcomeStatus,
   Transcript,
   TranscriptIdentity,
-  TranscriptReference,
   TranscriptSection,
   WorkerName,
 } from './types.js';
@@ -40,6 +39,14 @@ import type {
 import { parseDuration } from './duration-parser.js';
 
 export { parseDuration } from './duration-parser.js';
+
+// Artifact-reference scanning (commit SHAs / paths / URLs / issue numbers)
+// lives in its own module - a self-contained bank of independent regexes plus
+// the `looksLikePath` guard. Re-exported below so `extractReferences` keeps
+// its historical import path off `transcript-reader.js`.
+import { extractReferences } from './reference-extractor.js';
+
+export { extractReferences } from './reference-extractor.js';
 
 // ─── PUBLIC API ────────────────────────────────────────────────────────────────
 
@@ -274,8 +281,9 @@ export function parseOutcome(body: string): OutcomeStatus {
 }
 
 // `parseDuration` (the natural-language `## Duration` grammar) lives in
-// `./duration-parser.ts` and is re-exported at the top of this module so its
-// public import path off `transcript-reader.js` is unchanged.
+// `./duration-parser.ts` and `extractReferences` (artifact-reference scanning)
+// lives in `./reference-extractor.ts`; both are re-exported at the top of this
+// module so their public import paths off `transcript-reader.js` are unchanged.
 
 // ─── INTERNAL ──────────────────────────────────────────────────────────────────
 
@@ -416,64 +424,6 @@ function isNonTrivialErrorsBody(body: string): boolean {
   return norm.split(' ').length >= 2;
 }
 
-/**
- * Surface commit SHAs, file paths, URLs, PR/issue links from anywhere in the
- * transcript. Used by downstream Tier 1 verifiers to spot-check that
- * referenced artifacts actually exist.
- */
-export function extractReferences(sections: readonly TranscriptSection[]): TranscriptReference[] {
-  const out: TranscriptReference[] = [];
-  const seen = new Set<string>();
-
-  const add = (kind: TranscriptReference['kind'], value: string, section: string): void => {
-    const key = `${kind}|${value}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push({ kind, value, section });
-  };
-
-  for (const s of sections) {
-    const slug = s.slug;
-    const body = s.body;
-    if (!body) continue;
-
-    // URLs (with optional surrounding markdown link).
-    for (const m of body.matchAll(/https?:\/\/[^\s<>'`)\]]+/g)) {
-      const v = (m[0] ?? '').replace(/[.,;:!?)]+$/, '');
-      if (v) add('url', v, slug);
-    }
-
-    // PR/issue references like #1234 - common in repo-related transcripts.
-    for (const m of body.matchAll(/(?:^|[^\w])#(\d{2,7})\b/g)) {
-      add('issue', `#${m[1]}`, slug);
-    }
-
-    // Commit SHAs - 7-40 hex chars, surrounded by word boundaries / backticks.
-    for (const m of body.matchAll(/(?:^|[^A-Fa-f0-9`])`?([0-9a-f]{7,40})`?(?=\b)/g)) {
-      const sha = (m[1] ?? '').toLowerCase();
-      // Filter out obvious false positives (e.g. all zeros).
-      if (/^0+$/.test(sha)) continue;
-      add('commit', sha, slug);
-    }
-
-    // Backtick-quoted file paths and bare paths with extensions.
-    for (const m of body.matchAll(/`([^`\n]{1,160})`/g)) {
-      const v = (m[1] ?? '').trim();
-      if (looksLikePath(v)) add('file', v, slug);
-    }
-    for (const m of body.matchAll(/(?:^|\s)([A-Za-z0-9_./\\-]+\.(?:ts|tsx|js|jsx|md|json|yml|yaml|py|cs|csproj|mjs|sql|sh|toml|html|css))(?=\s|[.,;:)]|$)/g)) {
-      const v = (m[1] ?? '').trim();
-      if (looksLikePath(v)) add('file', v, slug);
-    }
-  }
-  return out;
-}
-
-function looksLikePath(s: string): boolean {
-  if (!s || s.length > 200) return false;
-  if (s.includes(' ')) return false;
-  if (/^https?:/i.test(s)) return false;
-  if (/^[0-9a-f]{7,40}$/i.test(s)) return false; // sha
-  if (s.includes('/') || s.includes('\\') || /\.[a-z0-9]{1,8}$/i.test(s)) return true;
-  return false;
-}
+// `extractReferences` (artifact-reference scanning) and its `looksLikePath`
+// guard now live in `./reference-extractor.ts` and are re-exported at the top
+// of this module.

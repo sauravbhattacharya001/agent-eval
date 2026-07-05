@@ -38,6 +38,7 @@ import type { BuiltSession, SessionMeta } from './types.js';
 import { toolSig } from './tool-signature.js';
 import { clip, LABEL_TRUNCATION } from './content-clip.js';
 import { runtimeFloorFromActivity } from './runtime-floor.js';
+import { buildExportTimeline } from './export-timeline.js';
 import { triageBuilt } from '../action/triage.js';
 import type { TriageOptions, TriageReport } from '../action/triage.js';
 
@@ -209,12 +210,14 @@ function buildTrace(traceId: string, runs: LangSmithRun[]): BuiltSession {
     events.push({ timestamp: latestEnd, type: 'end', content: rootStatus || 'end' });
   }
 
-  const timeline: RunTimeline = {
-    startedAt: Number.isFinite(startedMs) ? startedMs : (root.start_time ?? 0),
-    ...(anyMissingEnd || !Number.isFinite(latestEnd) ? {} : { endedAt: latestEnd }),
+  const timeline: RunTimeline = buildExportTimeline({
+    startMs: startedMs,
+    startFallback: root.start_time ?? 0,
+    endMs: latestEnd,
+    finished: !anyMissingEnd,
     events,
-    output: assistantTexts.join('\n').slice(0, 4000),
-  };
+    assistantTexts,
+  });
 
   const abortedAny = errored.length > 0 || anyMissingEnd || sawTimeout;
 

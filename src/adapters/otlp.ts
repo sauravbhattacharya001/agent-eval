@@ -38,6 +38,7 @@ import type { BuiltSession, SessionMeta } from './types.js';
 import { toolSig } from './tool-signature.js';
 import { clip, LABEL_TRUNCATION } from './content-clip.js';
 import { runtimeFloorFromActivity } from './runtime-floor.js';
+import { buildExportTimeline } from './export-timeline.js';
 import { triageBuilt } from '../action/triage.js';
 import type { TriageOptions, TriageReport } from '../action/triage.js';
 
@@ -252,12 +253,14 @@ function buildSession(sessionId: string, spans: NormSpan[]): BuiltSession {
   }
   if (!anyMissingEnd && Number.isFinite(endMs)) events.push({ timestamp: endMs, type: 'end', content: 'end' });
 
-  const timeline: RunTimeline = {
-    startedAt: Number.isFinite(startMs) ? startMs : 0,
-    ...(anyMissingEnd || !Number.isFinite(endMs) ? {} : { endedAt: endMs }),
+  const timeline: RunTimeline = buildExportTimeline({
+    startMs,
+    startFallback: 0,
+    endMs,
+    finished: !anyMissingEnd,
     events,
-    output: assistantTexts.join('\n').slice(0, 4000),
-  };
+    assistantTexts,
+  });
 
   const firstErr = errored[0];
   const label =

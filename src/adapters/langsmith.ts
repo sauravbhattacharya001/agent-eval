@@ -37,6 +37,7 @@ import type { RunEvent, RunTimeline } from '../checks/staleness.js';
 import type { BuiltSession, SessionMeta } from './types.js';
 import { toolSig } from './tool-signature.js';
 import { clip, LABEL_TRUNCATION } from './content-clip.js';
+import { runtimeFloorFromActivity } from './runtime-floor.js';
 import { triageBuilt } from '../action/triage.js';
 import type { TriageOptions, TriageReport } from '../action/triage.js';
 
@@ -176,14 +177,13 @@ function buildTrace(traceId: string, runs: LangSmithRun[]): BuiltSession {
   // at least this long, then it stopped emitting" — and beats rendering an unknown '?'.
   let runtimeMs =
     Number.isFinite(startedMs) && Number.isFinite(latestEnd) ? latestEnd - startedMs : NaN;
-  if (!Number.isFinite(runtimeMs) && Number.isFinite(startedMs)) {
-    let lastActivity = startedMs;
-    for (const r of runs) {
-      for (const t of [toMs(r.start_time), toMs(r.end_time)]) {
-        if (Number.isFinite(t) && t > lastActivity) lastActivity = t;
-      }
-    }
-    if (lastActivity > startedMs) runtimeMs = lastActivity - startedMs;
+  if (!Number.isFinite(runtimeMs)) {
+    runtimeMs = runtimeFloorFromActivity(
+      startedMs,
+      (function* () {
+        for (const r of runs) yield* [toMs(r.start_time), toMs(r.end_time)];
+      })(),
+    );
   }
 
   const events: RunEvent[] = [];

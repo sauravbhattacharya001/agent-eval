@@ -36,6 +36,7 @@ import type { RunEvent, RunTimeline } from '../checks/staleness.js';
 import type { BuiltSession, SessionMeta } from './types.js';
 import { toolSig } from './tool-signature.js';
 import { clip, LABEL_TRUNCATION } from './content-clip.js';
+import { runtimeFloorFromActivity } from './runtime-floor.js';
 import { triageBuilt } from '../action/triage.js';
 import type { TriageOptions, TriageReport } from '../action/triage.js';
 
@@ -144,18 +145,19 @@ function buildSession(exp: AgentLensExport): BuiltSession {
       : Number.isFinite(startMs) && Number.isFinite(endMs)
         ? endMs - startMs
         : NaN;
-  if (!Number.isFinite(runtimeMs) && Number.isFinite(startMs)) {
-    let last = startMs;
-    for (const e of evs) {
-      const t = toMs(e.timestamp);
-      if (Number.isFinite(t) && t > last) last = t;
-      // AgentLens events carry their own duration; an event that started at `t` and
-      // ran `duration_ms` extends the last observed activity to t + duration.
-      if (Number.isFinite(t) && typeof e.duration_ms === 'number' && t + e.duration_ms > last) {
-        last = t + e.duration_ms;
-      }
-    }
-    if (last > startMs) runtimeMs = last - startMs;
+  if (!Number.isFinite(runtimeMs)) {
+    runtimeMs = runtimeFloorFromActivity(
+      startMs,
+      (function* () {
+        for (const e of evs) {
+          const t = toMs(e.timestamp);
+          yield t;
+          // AgentLens events carry their own duration; an event that started at `t`
+          // and ran `duration_ms` extends the last observed activity to t + duration.
+          if (Number.isFinite(t) && typeof e.duration_ms === 'number') yield t + e.duration_ms;
+        }
+      })(),
+    );
   }
 
   const errorEventCount =

@@ -37,6 +37,7 @@ import type { RunEvent, RunTimeline } from '../checks/staleness.js';
 import type { BuiltSession, SessionMeta } from './types.js';
 import { toolSig } from './tool-signature.js';
 import { clip, LABEL_TRUNCATION } from './content-clip.js';
+import { runtimeFloorFromActivity } from './runtime-floor.js';
 import { triageBuilt } from '../action/triage.js';
 import type { TriageOptions, TriageReport } from '../action/triage.js';
 
@@ -220,10 +221,13 @@ function buildSession(sessionId: string, spans: NormSpan[]): BuiltSession {
   // Runtime; if unfinished, fall back to a floor from last observed activity.
   let runtimeMs =
     Number.isFinite(startMs) && Number.isFinite(endMs) ? endMs - startMs : NaN;
-  if (!Number.isFinite(runtimeMs) && Number.isFinite(startMs)) {
-    let last = startMs;
-    for (const s of spans) for (const t of [s.startMs, s.endMs]) if (Number.isFinite(t) && t > last) last = t;
-    if (last > startMs) runtimeMs = last - startMs;
+  if (!Number.isFinite(runtimeMs)) {
+    runtimeMs = runtimeFloorFromActivity(
+      startMs,
+      (function* () {
+        for (const s of spans) yield* [s.startMs, s.endMs];
+      })(),
+    );
   }
 
   const events: RunEvent[] = [];

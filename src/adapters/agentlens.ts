@@ -38,6 +38,7 @@ import { toolSig } from './tool-signature.js';
 import { clip, LABEL_TRUNCATION } from './content-clip.js';
 import { runtimeFloorFromActivity } from './runtime-floor.js';
 import { buildExportTimeline } from './export-timeline.js';
+import { parseExportRecords } from './export-records.js';
 import { triageBuilt } from '../action/triage.js';
 import type { TriageOptions, TriageReport } from '../action/triage.js';
 
@@ -249,32 +250,12 @@ function buildSession(exp: AgentLensExport): BuiltSession {
  * @param text  raw AgentLens export contents
  */
 export function parseAgentLens(text: string): BuiltSession[] {
-  const trimmed = text.trim();
-  if (!trimmed) return [];
-
-  const exports: AgentLensExport[] = [];
-  const pushOne = (o: unknown) => {
-    if (o && typeof o === 'object' && ('session' in o || 'events' in o)) exports.push(o as AgentLensExport);
-  };
-
-  if (trimmed[0] === '[') {
-    const arr = JSON.parse(trimmed);
-    if (Array.isArray(arr)) for (const o of arr) pushOne(o);
-  } else if (trimmed[0] === '{') {
-    pushOne(JSON.parse(trimmed));
-  } else {
-    for (const line of trimmed.split(/\r?\n/)) {
-      const l = line.trim();
-      if (!l) continue;
-      try {
-        pushOne(JSON.parse(l));
-      } catch {
-        /* skip */
-      }
-    }
-  }
-
-  return exports.map(buildSession);
+  // An AgentLens export is an object carrying a `session` and/or `events` block;
+  // every envelope (array / single object / NDJSON) keeps records passing that
+  // shape check. The shared dispatcher owns the envelope unwrapping.
+  const isExport = (o: unknown): o is AgentLensExport =>
+    !!o && typeof o === 'object' && ('session' in o || 'events' in o);
+  return parseExportRecords(text, isExport).map(buildSession);
 }
 
 /**

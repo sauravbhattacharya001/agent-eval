@@ -489,9 +489,16 @@ describe('scoreHistory', () => {
     writeFileSync(join(root, 'sentinel', '2026-06-07-1000.md'), GOOD_TRANSCRIPT, 'utf8');
     mkdirSync(join(root, 'gardener'), { recursive: true });
     writeFileSync(join(root, 'gardener', '2026-06-08-0900.md'), EMPTY_TRANSCRIPT, 'utf8');
-    // a corrupt-but-named file: still parses (parser is lenient), so to test
-    // hard failure we point at a path the loader can read but cannot identify.
+    // A byte-garbage file: the transcript parser is *lenient*, so this still
+    // parses (and scores) rather than throwing — it is NOT a hard failure.
+    // It exists to prove the runner tolerates junk content, not to test the
+    // error path (see the unreadable-at-load fixture below for that).
     writeFileSync(join(root, 'gardener', '2026-06-06-0900.md'), '\u0000\u0000', 'utf8');
+    // A conforming *name* that cannot be read as a file: `loadTranscript`'s
+    // readFileSync throws EISDIR here, which is the one reliable way to drive
+    // the runner's per-file error-isolation branch (discovery lists it, load
+    // fails). This is what actually exercises res.failed / res.errors.
+    mkdirSync(join(root, 'gardener', '2026-06-05-0900.md'), { recursive: true });
   });
   afterAll(() => {
     rmSync(root, { recursive: true, force: true });
@@ -572,6 +579,57 @@ describe('scoreHistory', () => {
     expect(res.discovered).toBe(0);
     expect(res.scored).toBe(0);
     expect(res.rows).toEqual([]);
+  });
+
+  it('isolates a per-file load failure without aborting the batch', () => {
+    // The unreadable `2026-06-05-0900.md` (a directory) is discovered but
+    // throws on read. The runner must record it in errors/failed and STILL
+    // score every readable transcript — one corrupt file never blocks the rest.
+    const res = scoreHistory(root, { persist: false });
+    expect(res.failed).toBeGreaterThanOrEqual(1);
+    expect(res.errors.length).toBe(res.failed);
+    const bad = res.errors.find((e) => e.path.endsWith('2026-06-05-0900.md'));
+    expect(bad).toBeDefined();
+    expect(bad?.error).toMatch(/EISDIR|illegal operation|directory/i);
+    // Isolation: the good sentinel runs were still scored despite the failure.
+    expect(res.scored).toBeGreaterThanOrEqual(3);
+    expect(res.scores.some((s) => s.worker === 'sentinel')).toBe(true);
+    // discovered counts both the failures and the successes.
+    expect(res.discovered).toBe(res.scored + res.failed);
+  });
+
+  it('reports failed as 0 when every discovered transcript loads', () => {
+    const res = scoreHistory(root, { workers: ['sentinel'], persist: false });
+    expect(res.failed).toBe(0);
+    expect(res.errors).toEqual([]);
+  });
+
+  it('skips excluded workers', () => {
+    const res = scoreHistory(root, { excludeWorkers: ['gardener'], persist: false });
+    // gardener held the empty/garbage/unreadable fixtures; excluding it drops
+    // both its scored rows and its load failure.
+    expect(res.scores.every((s) => s.worker !== 'gardener')).toBe(true);
+    expect(res.errors.every((e) => !e.path.includes('gardener'))).toBe(true);
+    expect(res.failed).toBe(0);
+    expect(res.scores.some((s) => s.worker === 'sentinel')).toBe(true);
+  });
+
+  it('forwards writeMode: append (blind append) instead of upserting', () => {
+    const fresh = mkdtempSync(join(tmpdir(), 'agent-eval-writemode-'));
+    try {
+      mkdirSync(join(fresh, 'sentinel'), { recursive: true });
+      writeFileSync(join(fresh, 'sentinel', '2026-06-08-1815.md'), GOOD_TRANSCRIPT, 'utf8');
+      // First pass writes 3 rows regardless of mode.
+      const first = scoreHistory(fresh, { writeMode: 'append' });
+      expect(first.written[0]?.total).toBe(3);
+      // Second append pass blindly appends the same 3 rows — 6 total, no upsert.
+      const second = scoreHistory(fresh, { writeMode: 'append' });
+      expect(second.written[0]?.replaced).toBe(0);
+      expect(second.written[0]?.total).toBe(6);
+      expect(readScores(scoresPathFor(fresh, 'sentinel')).length).toBe(6);
+    } finally {
+      rmSync(fresh, { recursive: true, force: true });
+    }
   });
 });
 

@@ -702,7 +702,11 @@ describe('buildScorecard (disk runner)', () => {
 
 // ─── Public API smoke (package root re-exports) ────────────────────────────
 
-describe('scorecard public API', () => {
+// These two smoke tests await import() on the package barrels; on a cold run
+// vitest compiles the whole module graph on first import (~3-4s), which can
+// exceed the 5s default. Give this suite headroom so it never cold-flakes
+// (scoped here so real hangs elsewhere still fail fast at the default).
+describe('scorecard public API', { timeout: 20000 }, () => {
   it('is re-exported from the package root', async () => {
     const mod = await import('../src/index.js');
     expect(typeof mod.aggregateScorecard).toBe('function');

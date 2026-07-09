@@ -317,21 +317,42 @@ export function parseOtlp(text: string): BuiltSession[] {
   if (!trimmed) return [];
 
   const payloads: OtlpTrace[] = [];
-  if (trimmed[0] === '[') {
-    const arr = JSON.parse(trimmed);
-    if (Array.isArray(arr)) for (const p of arr) if (p && typeof p === 'object') payloads.push(p as OtlpTrace);
-  } else if (trimmed[0] === '{') {
-    payloads.push(JSON.parse(trimmed) as OtlpTrace);
-  } else {
+
+  // NDJSON: one OTLP payload per line; malformed lines are skipped. Used both as the
+  // primary path (text that is neither a single array nor a single object) AND as a
+  // fallback when a structured parse of the whole blob fails — a real OTLP payload
+  // begins with `{`, so object-per-line NDJSON would otherwise be mis-routed into the
+  // single-object branch and throw on the second line.
+  const pushNdjson = () => {
     for (const line of trimmed.split(/\r?\n/)) {
       const l = line.trim();
       if (!l) continue;
       try {
         payloads.push(JSON.parse(l) as OtlpTrace);
       } catch {
-        /* skip */
+        /* skip malformed line */
       }
     }
+  };
+
+  const first = trimmed[0];
+  if (first === '[') {
+    // A top-level JSON array of payloads is unambiguously one document (this is not how
+    // NDJSON is emitted), so parse it directly — a malformed array is a real error.
+    const arr = JSON.parse(trimmed);
+    if (Array.isArray(arr)) for (const p of arr) if (p && typeof p === 'object') payloads.push(p as OtlpTrace);
+  } else if (first === '{') {
+    // Ambiguous: this is either ONE payload (`{ resourceSpans: [...] }`) OR
+    // payload-per-line NDJSON — both begin with `{`. Try the single-document parse
+    // first; if the whole blob does not parse as one JSON value it is
+    // newline-delimited payloads, so fall back to NDJSON instead of throwing.
+    try {
+      payloads.push(JSON.parse(trimmed) as OtlpTrace);
+    } catch {
+      pushNdjson();
+    }
+  } else {
+    pushNdjson();
   }
 
   // Collect every span, group by conversation id (fallback: traceId, then a synthetic key).

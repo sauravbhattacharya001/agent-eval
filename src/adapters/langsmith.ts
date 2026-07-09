@@ -259,6 +259,9 @@ function buildTrace(traceId: string, runs: LangSmithRun[]): BuiltSession {
  *
  * Accepts the JSON text of either a top-level array of runs, or `{ runs: [...] }`,
  * or newline-delimited JSON (one run per line, as `langsmith trace export` emits).
+ * NDJSON is detected as a fallback too: a multi-line blob whose first character is
+ * `{` (so each line is a run object) is parsed line-by-line when it does not parse
+ * as a single JSON document. Malformed NDJSON lines are skipped, not fatal.
  *
  * @param text  the raw export file contents
  */
@@ -271,25 +274,48 @@ export function parseLangSmith(text: string): BuiltSession[] {
     if (Array.isArray(arr)) for (const r of arr) if (r && typeof r === 'object') runs.push(r as LangSmithRun);
   };
 
-  if (trimmed[0] === '[') {
-    pushAll(JSON.parse(trimmed));
-  } else if (trimmed[0] === '{') {
-    const obj = JSON.parse(trimmed) as Record<string, unknown>;
-    if (Array.isArray(obj.runs)) pushAll(obj.runs);
-    else if (obj.id) runs.push(obj as LangSmithRun); // single run object
-    else pushAll(Object.values(obj)); // last resort: values are runs
-  } else {
-    // NDJSON: one run per line.
+  // NDJSON: one JSON value per line; malformed lines are skipped. Used both as the
+  // primary path (text that is neither a single array nor a single object) AND as a
+  // fallback when a structured parse of the whole blob fails — because object-per-line
+  // NDJSON begins with `{` and would otherwise be mis-routed into the single-object
+  // branch and throw on the second line.
+  const pushNdjson = () => {
     for (const line of trimmed.split(/\r?\n/)) {
       const l = line.trim();
       if (!l) continue;
       try {
         const r = JSON.parse(l);
-        if (r && typeof r === 'object') runs.push(r as LangSmithRun);
+        if (Array.isArray(r)) pushAll(r);
+        else if (r && typeof r === 'object') runs.push(r as LangSmithRun);
       } catch {
         /* skip malformed line */
       }
     }
+  };
+
+  const first = trimmed[0];
+  if (first === '[') {
+    // A top-level JSON array of runs is unambiguously one document (this is not how
+    // NDJSON is emitted), so parse it directly — a malformed array is a real error.
+    pushAll(JSON.parse(trimmed));
+  } else if (first === '{') {
+    // Ambiguous: this is either ONE object (a `{ runs: [...] }` wrapper or a single
+    // run) OR object-per-line NDJSON — both begin with `{`. Try the single-document
+    // parse first; if the whole blob does not parse as one JSON value it is
+    // newline-delimited runs, so fall back to NDJSON instead of throwing.
+    let parsed: Record<string, unknown> | undefined;
+    try {
+      parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    } catch {
+      pushNdjson();
+    }
+    if (parsed) {
+      if (Array.isArray(parsed.runs)) pushAll(parsed.runs);
+      else if (parsed.id) runs.push(parsed as LangSmithRun); // single run object
+      else pushAll(Object.values(parsed)); // last resort: values are runs
+    }
+  } else {
+    pushNdjson();
   }
 
   // Group by trace_id (fall back to id when trace_id is absent → each run its own trace).

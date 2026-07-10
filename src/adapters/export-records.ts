@@ -9,7 +9,10 @@
  *   1. a top-level **JSON array** of records — `[ {...}, {...} ]`
  *   2. a **single JSON object** — `{ ... }`
  *   3. **NDJSON** — one JSON value per line, blank lines skipped, malformed lines
- *      silently dropped (as `<tool> trace export` / `client.list_runs` emit)
+ *      silently dropped (as `<tool> trace export` / `client.list_runs` emit). A real
+ *      record begins with `{`, so object-per-line NDJSON is recovered as a fallback
+ *      when the whole `{`-leading blob does not parse as one JSON document (instead
+ *      of throwing on the second line).
  *
  * Each adapter previously carried a byte-identical copy of that dispatch: trim,
  * bail on empty, branch on `trimmed[0]` (`[` vs `{` vs NDJSON), and for NDJSON
@@ -60,12 +63,10 @@
  *   const arr = JSON.parse(trimmed);
  *   if (Array.isArray(arr)) for (const o of arr) if (accept(o)) out.push(o);
  * } else if (trimmed[0] === '{') {
- *   const o = JSON.parse(trimmed); if (accept(o)) out.push(o);
+ *   try { const o = JSON.parse(trimmed); if (accept(o)) out.push(o); }
+ *   catch { pushNdjson(); }   // object-per-line NDJSON fallback
  * } else {
- *   for (const line of trimmed.split(/\r?\n/)) {
- *     const l = line.trim(); if (!l) continue;
- *     try { const o = JSON.parse(l); if (accept(o)) out.push(o); } catch {}
- *   }
+ *   pushNdjson();
  * }
  * ```
  *
@@ -85,13 +86,13 @@ export function parseExportRecords<T>(
   const trimmed = text.trim();
   if (!trimmed) return out;
 
-  if (trimmed[0] === '[') {
-    const arr = JSON.parse(trimmed);
-    if (Array.isArray(arr)) for (const o of arr) if (accept(o)) out.push(o);
-  } else if (trimmed[0] === '{') {
-    const o = JSON.parse(trimmed);
-    if (accept(o)) out.push(o);
-  } else {
+  // NDJSON: one JSON value per line; blank/malformed lines are skipped. Used both as
+  // the primary path (text that is neither a single array nor a single object) AND as a
+  // fallback when a structured parse of a `{`-leading blob fails — a real record begins
+  // with `{`, so object-per-line NDJSON would otherwise be mis-routed into the
+  // single-object branch and throw on the second line. This mirrors the same NDJSON
+  // fallback the OTLP and LangSmith adapters carry inline.
+  const pushNdjson = () => {
     for (const line of trimmed.split(/\r?\n/)) {
       const l = line.trim();
       if (!l) continue;
@@ -102,6 +103,27 @@ export function parseExportRecords<T>(
         /* skip malformed line */
       }
     }
+  };
+
+  const first = trimmed[0];
+  if (first === '[') {
+    // A top-level JSON array of records is unambiguously one document (this is not how
+    // NDJSON is emitted), so parse it directly — a malformed array is a real error.
+    const arr = JSON.parse(trimmed);
+    if (Array.isArray(arr)) for (const o of arr) if (accept(o)) out.push(o);
+  } else if (first === '{') {
+    // Ambiguous: this is either ONE record (`{ ... }`) OR record-per-line NDJSON —
+    // both begin with `{`. Try the single-document parse first; if the whole blob does
+    // not parse as one JSON value it is newline-delimited records, so fall back to
+    // NDJSON instead of throwing.
+    try {
+      const o = JSON.parse(trimmed);
+      if (accept(o)) out.push(o);
+    } catch {
+      pushNdjson();
+    }
+  } else {
+    pushNdjson();
   }
 
   return out;

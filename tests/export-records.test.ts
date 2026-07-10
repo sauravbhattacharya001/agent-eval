@@ -19,18 +19,20 @@
  *   3. A `{`-led blob is parsed as a single object and filtered by `accept`.
  *   4. Anything else (first char is neither `[` nor `{`) is NDJSON: split on
  *      `/\r?\n/`, each line trimmed, blank lines skipped, malformed lines silently
- *      dropped, the rest filtered by `accept`.
+ *      dropped, the rest filtered by `accept`. A `{`-led multi-line blob is ALSO
+ *      recovered as NDJSON when it fails to parse as one JSON document (real export
+ *      records begin with `{`, so object-per-line NDJSON must round-trip).
  *   5. `accept` is applied to EVERY candidate in ALL branches (uniformity is the
  *      exact property that let AgentLens delegate here); it also narrows the type.
- *   6. A malformed array / single-object payload surfaces the native `JSON.parse`
- *      error (only NDJSON swallows per-line parse failures) — unchanged from the
- *      inline code.
+ *   6. A malformed array surfaces the native `JSON.parse` error; a `{`-led blob that
+ *      fails single-document parse is retried as NDJSON, so a malformed single line
+ *      is dropped (→ `[]`) rather than throwing — only NDJSON's per-line failures are
+ *      swallowed, and a `{`-led blob now shares that path on fallback.
  *
- * Note on the envelope choice: it is decided purely by `trimmed[0]`, exactly as the
- * per-adapter code did. A `{`-led multi-line blob is therefore treated as ONE
- * object (not NDJSON); this preserved quirk is pinned below so a future "make
- * NDJSON smarter" change can't silently break byte-for-byte parity with the
- * adapters this helper was factored out of.
+ * Note on the envelope choice: it is decided by `trimmed[0]`, with a `{`-led blob
+ * that fails single-document parse retried as object-per-line NDJSON — the same
+ * fallback the OTLP and LangSmith adapters carry inline. This keeps NDJSON of
+ * exports (every line begins with `{`) working instead of throwing on line two.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -90,18 +92,19 @@ describe('parseExportRecords — single JSON object envelope', () => {
     expect(parseExportRecords('{"nope":true}', isRec)).toEqual([]);
   });
 
-  it('throws on a malformed `{`-led blob (native JSON.parse error, not swallowed)', () => {
-    expect(() => parseExportRecords('{"id":', isRec)).toThrow();
+  it('a malformed single-line `{` blob yields [] (retried as NDJSON, bad line dropped)', () => {
+    // A `{`-led blob that fails single-document parse falls back to NDJSON; a lone
+    // malformed line is then silently dropped, so the result is empty (not a throw).
+    // Only a malformed `[`-led array still surfaces the native error.
+    expect(parseExportRecords('{"id":', isRec)).toEqual([]);
   });
 });
 
 describe('parseExportRecords — NDJSON envelope', () => {
-  // The envelope is chosen by `trimmed[0]`. NDJSON is only reached when the blob
-  // does NOT start with `{` or `[`. A `{`-led multi-line blob takes the
-  // single-object branch and JSON.parse throws on the trailing lines — this mirrors
-  // the exact per-adapter dispatch that was extracted here, quirk included. So the
-  // NDJSON path is exercised with non-object-led lines (scalars) via a guard that
-  // accepts them, proving the line-split / blank-skip / malformed-skip logic.
+  // NDJSON is reached both when the blob does NOT start with `{`/`[` AND as a
+  // fallback for a `{`-led multi-line blob that fails single-document parse. The
+  // scalar-per-line cases below exercise the primary (non-object-led) path; the
+  // object-per-line fallback is pinned in its own test.
   const isNum = (o: unknown): o is number => typeof o === 'number';
 
   it('parses one value per line, keeping accepted ones in line order', () => {
@@ -125,11 +128,12 @@ describe('parseExportRecords — NDJSON envelope', () => {
     expect(parseExportRecords('1\n"two"\ntrue\n2', isNum)).toEqual([1, 2]);
   });
 
-  it('a `{`-led multi-line blob is NOT NDJSON: it takes the single-object branch and throws', () => {
-    // Pins the preserved quirk — dispatch is on trimmed[0], so a blob whose first
-    // char is `{` is parsed as ONE object over the whole string, which fails on the
-    // second line. Unchanged by the extraction; documented so it stays that way.
-    expect(() => parseExportRecords('{"id":1}\n{"id":2}', isRec)).toThrow();
+  it('recovers a `{`-led multi-line blob as object-per-line NDJSON', () => {
+    // Regression: every export record begins with `{`, so a `{`-led blob is tried as
+    // one document first, then — on parse failure — retried as NDJSON instead of
+    // throwing on the second line. This is the fix that keeps NDJSON of exports working.
+    const out = parseExportRecords('{"id":1}\n{"id":2}', isRec);
+    expect(out.map((r) => r.id)).toEqual([1, 2]);
   });
 });
 

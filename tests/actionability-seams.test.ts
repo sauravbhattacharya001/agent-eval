@@ -1,11 +1,12 @@
 /**
  * Seam tests for the Actionability check split.
  *
- * `actionability.ts` was split into four sibling seams — `actionability-types.ts`,
- * `actionability-patterns.ts`, `actionability-extraction.ts`, and
- * `actionability-scoring.ts` — with `actionability.ts` kept as the public barrel
- * (re-exporting everything) plus the Tier-3 wiring (`ACTIONABILITY_RUBRIC` and
- * the assertion factories).
+ * `actionability.ts` was split into single-responsibility sibling seams —
+ * `actionability-types.ts`, `actionability-patterns.ts`,
+ * `actionability-extraction.ts`, `actionability-scoring.ts`,
+ * `actionability-rubric.ts` (the Tier-3 `ACTIONABILITY_RUBRIC`), and
+ * `actionability-assertions.ts` (the assertion factories) — with
+ * `actionability.ts` kept as a pure public barrel that re-exports everything.
  *
  * The behavioural suite in `actionability.test.ts` imports everything from
  * `actionability.js` and therefore only reaches the moved units transitively.
@@ -32,6 +33,14 @@ import {
   scoreSentence as scoreSentenceSeam,
   analyzeActionability as analyzeActionabilitySeam,
 } from '../src/checks/actionability-scoring.js';
+import { ACTIONABILITY_RUBRIC as ACTIONABILITY_RUBRIC_SEAM } from '../src/checks/actionability-rubric.js';
+import {
+  toBeActionable as toBeActionableSeam,
+  toHaveMinimalFiller as toHaveMinimalFillerSeam,
+  toBeSpecific as toBeSpecificSeam,
+  toPassActionabilityJudge as toPassActionabilityJudgeSeam,
+  toHaveActionabilityAbove as toHaveActionabilityAboveSeam,
+} from '../src/checks/actionability-assertions.js';
 
 // Public barrel — what consumers import.
 import {
@@ -41,6 +50,12 @@ import {
   detectFiller,
   scoreSentence,
   analyzeActionability,
+  ACTIONABILITY_RUBRIC,
+  toBeActionable,
+  toHaveMinimalFiller,
+  toBeSpecific,
+  toPassActionabilityJudge,
+  toHaveActionabilityAbove,
   type ActionableElement,
   type FillerPattern,
 } from '../src/checks/actionability.js';
@@ -61,6 +76,18 @@ describe('actionability.ts re-exports the same references as its seams', () => {
   it('scoring seam (actionability-scoring.ts)', () => {
     expect(scoreSentence).toBe(scoreSentenceSeam);
     expect(analyzeActionability).toBe(analyzeActionabilitySeam);
+  });
+
+  it('rubric seam (actionability-rubric.ts)', () => {
+    expect(ACTIONABILITY_RUBRIC).toBe(ACTIONABILITY_RUBRIC_SEAM);
+  });
+
+  it('assertion-factory seam (actionability-assertions.ts)', () => {
+    expect(toBeActionable).toBe(toBeActionableSeam);
+    expect(toHaveMinimalFiller).toBe(toHaveMinimalFillerSeam);
+    expect(toBeSpecific).toBe(toBeSpecificSeam);
+    expect(toPassActionabilityJudge).toBe(toPassActionabilityJudgeSeam);
+    expect(toHaveActionabilityAbove).toBe(toHaveActionabilityAboveSeam);
   });
 });
 

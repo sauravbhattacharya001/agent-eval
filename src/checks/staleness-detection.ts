@@ -2,9 +2,11 @@
  * Timeout/Staleness Detector - detection engine.
  *
  * The pure, deterministic core of the staleness check: timestamp parsing and
- * formatting, the built-in abandonment/stall pattern tables, and the per-axis
- * detectors (timeout, activity-gap staleness, output-text abandonment,
- * progress/stall) plus the combined `analyzeStaleness` roll-up.
+ * formatting, the per-timeline detectors (timeout, activity-gap staleness,
+ * progress/stall) plus the combined `analyzeStaleness` roll-up. The static
+ * pattern tables + code-balance helper live in `./staleness-patterns.js`, and
+ * the output-text abandonment detector in `./staleness-abandonment.js`; both are
+ * re-exported here so consumers keep a single import surface.
  *
  * No filesystem or network access - it operates only on the {@link RunTimeline}
  * and output text it is handed. The assertion factories that wrap these into
@@ -25,27 +27,12 @@ import type {
   StalenessResult,
   StalenessIssue,
 } from './staleness-types.js';
+import { detectAbandonment } from './staleness-abandonment.js';
 
-// ─── CONSTANTS ──────────────────────────────────────────────────────────────────
-
-/** Built-in patterns that indicate an abandoned or interrupted output. */
-const ABANDONMENT_PATTERNS: ReadonlyArray<{ pattern: RegExp; label: string }> = [
-  { pattern: /\.\.\.$/, label: 'trailing ellipsis (incomplete thought)' },
-  { pattern: /\[(?:TODO|FIXME|PLACEHOLDER|TBD|WIP)\]/i, label: 'TODO/placeholder marker' },
-  { pattern: /(?:I'll|Let me|I will|I need to|I should|Next,? I)[\s\S]{0,30}$/, label: 'stated intent without follow-through' },
-  { pattern: /```[\w]*\n[^`]*$/, label: 'unclosed code block' },
-  { pattern: /<!--\s*[^>]*$/, label: 'unclosed HTML comment' },
-  { pattern: /\n\s*[-*]\s*$/, label: 'empty list item at end' },
-  { pattern: /(?:Step|Part|Section)\s+\d+[:.]\s*$/, label: 'empty section header at end' },
-  { pattern: /\|\s*[-:]+\s*\|[\s\S]{0,5}$/, label: 'incomplete table' },
-  { pattern: />\s*$/, label: 'empty blockquote at end' },
-];
-
-/** Patterns indicating a stalled/looping agent. */
-export const STALL_PATTERNS: ReadonlyArray<{ pattern: RegExp; label: string }> = [
-  { pattern: /(?:error|failed|retry).*(?:error|failed|retry).*(?:error|failed|retry)/is, label: 'repeated errors (possible retry loop)' },
-  { pattern: /(.{50,})\1{2,}/s, label: 'repeated content block' },
-];
+// Re-export the pattern tables + code-balance helper and the abandonment
+// detector so `./staleness-detection.js` remains a single import surface.
+export { ABANDONMENT_PATTERNS, STALL_PATTERNS, detectUnbalancedCode } from './staleness-patterns.js';
+export { detectAbandonment } from './staleness-abandonment.js';
 
 // ─── UTILITY FUNCTIONS ──────────────────────────────────────────────────────────
 
@@ -167,162 +154,6 @@ export function detectStaleness(timeline: RunTimeline, options: StalenessOptions
   }
 
   return issues;
-}
-
-/**
- * Detect abandonment markers in the output text.
- */
-export function detectAbandonment(output: string, options: AbandonmentOptions = {}): StalenessIssue[] {
-  const {
-    customPatterns = [],
-    checkIncompleteSentence = true,
-    checkTodoMarkers = true,
-    checkUnbalancedCode = true,
-    minLengthForCheck = 10,
-  } = options;
-
-  if (output.length < minLengthForCheck) return [];
-
-  const issues: StalenessIssue[] = [];
-  const trimmed = output.trimEnd();
-
-  // Check built-in abandonment patterns
-  for (const { pattern, label } of ABANDONMENT_PATTERNS) {
-    if (pattern.test(trimmed)) {
-      issues.push({
-        kind: 'abandoned',
-        severity: 'warning',
-        message: `Output shows abandonment signal: ${label}`,
-        evidence: `Matched pattern at end of output: "${trimmed.slice(-80)}"`,
-      });
-    }
-  }
-
-  // Check custom patterns
-  for (const pattern of customPatterns) {
-    if (pattern.test(trimmed)) {
-      issues.push({
-        kind: 'abandoned',
-        severity: 'warning',
-        message: `Output matches custom abandonment pattern: ${pattern.source}`,
-        evidence: `Pattern: ${pattern.toString()}`,
-      });
-    }
-  }
-
-  // Check for incomplete sentence at the end
-  if (checkIncompleteSentence) {
-    // Get last non-empty line
-    const lines = trimmed.split('\n').filter(l => l.trim().length > 0);
-    const lastLineRaw = lines[lines.length - 1];
-    const lastLine = lastLineRaw ? lastLineRaw.trim() : '';
-    if (lastLine.length > 0) {
-      // Skip if it's a code block, heading, list marker, etc.
-      const isStructural = /^[#>|`\-*\d]/.test(lastLine) || /^[\[\(]/.test(lastLine);
-      if (!isStructural && lastLine.length > 15) {
-        // Sentence should end with punctuation
-        const endsWithPunctuation = /[.!?;:)\]"'`]$/.test(lastLine);
-        if (!endsWithPunctuation) {
-          issues.push({
-            kind: 'abandoned',
-            severity: 'warning',
-            message: 'Output ends mid-sentence (no terminal punctuation)',
-            evidence: `Last line: "${lastLine.slice(-60)}"`,
-          });
-        }
-      }
-    }
-  }
-
-  // Check for TODO markers embedded in the text
-  if (checkTodoMarkers) {
-    const todoPattern = /\b(?:TODO|FIXME|PLACEHOLDER|TBD|XXX|HACK)\b/gi;
-    const matches = trimmed.match(todoPattern);
-    if (matches && matches.length > 0) {
-      issues.push({
-        kind: 'abandoned',
-        severity: 'warning',
-        message: `Output contains ${matches.length} TODO/placeholder marker(s)`,
-        evidence: `Found: ${[...new Set(matches)].join(', ')}`,
-      });
-    }
-  }
-
-  // Check for unbalanced code constructs
-  if (checkUnbalancedCode) {
-    const unbalanced = detectUnbalancedCode(trimmed);
-    if (unbalanced) {
-      issues.push({
-        kind: 'abandoned',
-        severity: 'error',
-        message: `Output has unbalanced code: ${unbalanced}`,
-        evidence: `Detected in output text (truncation mid-code)`,
-      });
-    }
-  }
-
-  // Check stall patterns
-  for (const { pattern, label } of STALL_PATTERNS) {
-    if (pattern.test(trimmed)) {
-      issues.push({
-        kind: 'no_progress',
-        severity: 'warning',
-        message: `Output shows stall signal: ${label}`,
-        evidence: `Matched stall pattern in output`,
-      });
-    }
-  }
-
-  return issues;
-}
-
-/**
- * Detect unbalanced brackets/delimiters indicating code truncation.
- * Returns a description of the imbalance, or null if balanced.
- */
-function detectUnbalancedCode(text: string): string | null {
-  // Only check within code blocks or code-like content
-  const codeBlockRegex = /```[\w]*\n([\s\S]*?)(?:```|$)/g;
-  let match: RegExpExecArray | null;
-  const codeSegments: string[] = [];
-
-  while ((match = codeBlockRegex.exec(text)) !== null) {
-    if (match[1] !== undefined) {
-      codeSegments.push(match[1]);
-    }
-  }
-
-  // If no code blocks, check the whole text only if it looks like code
-  const textToCheck = codeSegments.length > 0
-    ? codeSegments.join('\n')
-    : (/[{}\[\]()]/.test(text) && /(?:function|class|const|let|var|if|for|while|import|export|def|fn)\b/.test(text) ? text : null);
-
-  if (!textToCheck) return null;
-
-  let braces = 0;
-  let brackets = 0;
-  let parens = 0;
-
-  for (const ch of textToCheck) {
-    switch (ch) {
-      case '{': braces++; break;
-      case '}': braces--; break;
-      case '[': brackets++; break;
-      case ']': brackets--; break;
-      case '(': parens++; break;
-      case ')': parens--; break;
-    }
-  }
-
-  const issues: string[] = [];
-  if (braces > 0) issues.push(`${braces} unclosed brace(s)`);
-  if (braces < 0) issues.push(`${-braces} extra closing brace(s)`);
-  if (brackets > 0) issues.push(`${brackets} unclosed bracket(s)`);
-  if (brackets < 0) issues.push(`${-brackets} extra closing bracket(s)`);
-  if (parens > 0) issues.push(`${parens} unclosed parenthesis(es)`);
-  if (parens < 0) issues.push(`${-parens} extra closing parenthesis(es)`);
-
-  return issues.length > 0 ? issues.join(', ') : null;
 }
 
 /**

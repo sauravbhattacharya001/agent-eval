@@ -30,7 +30,21 @@ import {
   detectAbandonment as detectAbandonmentSeam,
   analyzeProgress as analyzeProgressSeam,
   analyzeStaleness as analyzeStalenessSeam,
+  ABANDONMENT_PATTERNS as ABANDONMENT_PATTERNS_SEAM,
+  STALL_PATTERNS as STALL_PATTERNS_SEAM,
+  detectUnbalancedCode as detectUnbalancedCodeSeam,
 } from '../src/checks/staleness-detection.js';
+
+// Pattern-table + code-balance seam - the static, content-agnostic building
+// blocks that the abandonment detector consumes, imported from their own home.
+import {
+  ABANDONMENT_PATTERNS as ABANDONMENT_PATTERNS_HOME,
+  STALL_PATTERNS as STALL_PATTERNS_HOME,
+  detectUnbalancedCode as detectUnbalancedCodeHome,
+} from '../src/checks/staleness-patterns.js';
+
+// Abandonment seam - the output-text-only detector, imported from its own home.
+import { detectAbandonment as detectAbandonmentHome } from '../src/checks/staleness-abandonment.js';
 
 // Public barrel - what consumers import.
 import {
@@ -70,6 +84,28 @@ describe('staleness.ts re-exports the same references as its seams', () => {
     expect(detectAbandonment).toBe(detectAbandonmentSeam);
     expect(analyzeProgress).toBe(analyzeProgressSeam);
     expect(analyzeStaleness).toBe(analyzeStalenessSeam);
+  });
+
+  it('abandonment seam (staleness-abandonment.ts) is the same reference everywhere', () => {
+    // detectAbandonment now lives in its own module; both the barrel and the
+    // detection engine must re-export that exact reference (no divergence).
+    expect(detectAbandonment).toBe(detectAbandonmentHome);
+    expect(detectAbandonmentSeam).toBe(detectAbandonmentHome);
+  });
+
+  it('pattern seam (staleness-patterns.ts) is re-exported by the detection engine', () => {
+    // The pattern tables + code-balance helper were extracted to their own home;
+    // staleness-detection.ts re-exports the same references.
+    expect(ABANDONMENT_PATTERNS_SEAM).toBe(ABANDONMENT_PATTERNS_HOME);
+    expect(STALL_PATTERNS_SEAM).toBe(STALL_PATTERNS_HOME);
+    expect(detectUnbalancedCodeSeam).toBe(detectUnbalancedCodeHome);
+  });
+
+  it('pattern seam: detectUnbalancedCode flags truncated code and passes balanced code', () => {
+    expect(detectUnbalancedCodeHome('```js\nfunction f() {\n')).toContain('unclosed brace');
+    expect(detectUnbalancedCodeHome('```js\nconst x = [1, 2, 3];\n```')).toBeNull();
+    // Non-code prose without code-like keywords is ignored entirely.
+    expect(detectUnbalancedCodeHome('just some prose with no brackets')).toBeNull();
   });
 
   it('types seam is structurally compatible with the barrel re-export', () => {

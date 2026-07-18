@@ -438,48 +438,8 @@ export function agentContext(run: AgentRunResult): {
 
 // ─── TOOL BUILDERS ──────────────────────────────────────────────────────────────
 
-/**
- * Fluent tool definition builder.
- *
- * @example
- * ```ts
- * const readFile = defineTool('read_file')
- *   .describe('Read a file from disk')
- *   .param('path', 'string', 'File path to read', true)
- *   .execute(async (args) => fs.readFileSync(args.path as string, 'utf-8'));
- * ```
- */
-export function defineTool(name: string): ToolBuilder {
-  return new ToolBuilder(name);
-}
-
-export class ToolBuilder {
-  private _name: string;
-  private _description = '';
-  private _params: Record<string, unknown> = { type: 'object', properties: {}, required: [] };
-
-  constructor(name: string) {
-    this._name = name;
-  }
-
-  describe(description: string): this {
-    this._description = description;
-    return this;
-  }
-
-  param(name: string, type: string, description: string, required = false): this {
-    const props = (this._params as { properties: Record<string, unknown>; required: string[] });
-    props.properties[name] = { type, description };
-    if (required) props.required.push(name);
-    return this;
-  }
-
-  execute(fn: (args: Record<string, unknown>) => Promise<string>): ToolDefinition {
-    return {
-      name: this._name,
-      description: this._description,
-      parameters: this._params,
-      execute: fn,
-    };
-  }
-}
+// The fluent tool-definition builder (`defineTool` / `ToolBuilder`) lives in a
+// leaf module so this file stays focused on the agentic loop, tool dispatch, and
+// timeline capture. They are re-exported here so the public surface at
+// `./providers/agent.js` is unchanged. See ./agent-tools.ts.
+export { defineTool, ToolBuilder } from './agent-tools.js';

@@ -1,11 +1,12 @@
 /**
  * Repetition/Loop Detection - analysis engine.
  *
- * Pure text analysis: normalization + segmentation helpers, similarity, and the
- * four detectors (`analyzeRepetition`, `detectLoops`, `analyzeNgramSaturation`,
- * `analyzeFullRepetition`). No AI calls, no IO. The assertion factories that wrap
- * these live in `./repetition.js`, which re-exports this module so the public
- * surface stays a single `./repetition.js` import path.
+ * The four detectors (`analyzeRepetition`, `detectLoops`, `analyzeNgramSaturation`,
+ * `analyzeFullRepetition`). No AI calls, no IO. The shared text primitives
+ * (normalize/split/similarity/n-gram) live in `./repetition-text.js`; the
+ * assertion factories that wrap these detectors live in `./repetition.js`, which
+ * re-exports both modules so the public surface stays a single `./repetition.js`
+ * import path.
  *
  * @tier 2 - Heuristic (no AI, detects behavioral patterns)
  * @module
@@ -24,97 +25,19 @@ import type {
   FullRepetitionOptions,
   FullRepetitionResult,
 } from './repetition-types.js';
+import {
+  normalize,
+  splitSentences,
+  splitParagraphs,
+  splitLines,
+  areSimilar,
+  segmentSimilarity,
+  extractWordNgrams,
+} from './repetition-text.js';
 
-// ─── NORMALIZATION UTILITIES ────────────────────────────────────────────────────
-
-/**
- * Normalize text for comparison.
- */
-function normalize(
-  text: string,
-  options: { normalizeWhitespace?: boolean; ignoreCase?: boolean } = {},
-): string {
-  const { normalizeWhitespace = true, ignoreCase = true } = options;
-  let result = text;
-  if (ignoreCase) result = result.toLowerCase();
-  if (normalizeWhitespace) result = result.replace(/\s+/g, ' ').trim();
-  return result;
-}
-
-/**
- * Split text into sentences (simple heuristic).
- * Splits on sentence-ending punctuation followed by whitespace.
- */
-export function splitSentences(text: string): string[] {
-  // Split on .!? followed by whitespace or end of string
-  const raw = text.split(/(?<=[.!?])\s+/);
-  return raw
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
-
-/**
- * Split text into paragraphs (double newline separated).
- */
-export function splitParagraphs(text: string): string[] {
-  return text
-    .split(/\n\s*\n/)
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0);
-}
-
-/**
- * Split text into lines (single newline separated, ignoring empty).
- */
-export function splitLines(text: string): string[] {
-  return text
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
-}
-
-// ─── SIMILARITY ─────────────────────────────────────────────────────────────────
-
-/**
- * Compute Jaccard similarity between two sets of words.
- * Returns value between 0 (no overlap) and 1 (identical).
- */
-function jaccardSimilarity(a: string, b: string): number {
-  const wordsA = new Set(a.split(/\s+/));
-  const wordsB = new Set(b.split(/\s+/));
-
-  if (wordsA.size === 0 && wordsB.size === 0) return 1;
-  if (wordsA.size === 0 || wordsB.size === 0) return 0;
-
-  let intersection = 0;
-  for (const word of wordsA) {
-    if (wordsB.has(word)) intersection++;
-  }
-
-  const union = wordsA.size + wordsB.size - intersection;
-  return union === 0 ? 0 : intersection / union;
-}
-
-/**
- * Check if two strings are similar above a threshold.
- */
-function areSimilar(a: string, b: string, threshold: number): boolean {
-  // Fast path: exact match
-  if (a === b) return true;
-  // Fast path: length difference too large
-  const lenRatio = Math.min(a.length, b.length) / Math.max(a.length, b.length);
-  if (lenRatio < threshold * 0.7) return false;
-  return jaccardSimilarity(a, b) >= threshold;
-}
-
-/**
- * Compute similarity score between two strings (0–1).
- */
-export function segmentSimilarity(a: string, b: string): number {
-  if (a === b) return 1;
-  if (a.length === 0 || b.length === 0) return 0;
-  return jaccardSimilarity(a, b);
-}
+// Re-export the shared text primitives that are part of the public surface so
+// the `./repetition.js` barrel can continue to source them from here.
+export { splitSentences, splitParagraphs, splitLines, segmentSimilarity };
 
 // ─── REPETITION ANALYSIS ────────────────────────────────────────────────────────
 
@@ -351,23 +274,6 @@ export function detectLoops(
 }
 
 // ─── N-GRAM SATURATION ──────────────────────────────────────────────────────────
-
-/**
- * Extract word n-grams from text.
- */
-function extractWordNgrams(text: string, n: number): string[] {
-  const words = text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, '')
-    .split(/\s+/)
-    .filter((w) => w.length > 0);
-
-  const ngrams: string[] = [];
-  for (let i = 0; i <= words.length - n; i++) {
-    ngrams.push(words.slice(i, i + n).join(' '));
-  }
-  return ngrams;
-}
 
 /**
  * Analyze n-gram saturation — whether a small set of phrases dominates the output.

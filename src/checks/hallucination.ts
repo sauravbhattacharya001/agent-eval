@@ -21,14 +21,15 @@
  * - `./hallucination-types.js`        — the type vocabulary (claims, verifications, options)
  * - `./hallucination-extraction.js`   — text → factual-claim extraction
  * - `./hallucination-verification.js` — claim verification + scoring (Tier 1+2+3)
+ * - `./hallucination-assert.js`       — the shared assertion shell (merge/time/analyze/catch)
  *
  * @tier mixed (1+2+3)
  * @module
  */
 
-import type { Assertion, AssertionResult, EvalContext } from '../core/types.js';
+import type { Assertion } from '../core/types.js';
 import type { HallucinationOptions } from './hallucination-types.js';
-import { analyzeHallucination } from './hallucination-verification.js';
+import { makeHallucinationAssertion } from './hallucination-assert.js';
 
 // ─── TYPE RE-EXPORTS ──────────────────────────────────────────────────────────
 // The hallucination type vocabulary lives in ./hallucination-types.js;
@@ -62,6 +63,11 @@ export {
   analyzeHallucination,
 } from './hallucination-verification.js';
 
+// ─── ASSERTION-SHELL RE-EXPORT ─────────────────────────────────────────────────
+// The shared merge/time/analyze/catch scaffold used by every factory below.
+export { makeHallucinationAssertion } from './hallucination-assert.js';
+export type { HallucinationDecision } from './hallucination-assert.js';
+
 // === ASSERTION FACTORIES =====================================================
 
 /**
@@ -82,74 +88,56 @@ export function toNotHallucinate(
   const maxUngrounded = options.maxUngroundedClaims ?? 3;
   const failOnContradiction = options.failOnContradiction ?? true;
 
-  return {
-    name: '[Tier 1+2] output does not hallucinate',
-    async evaluate(output: string, context?: EvalContext): Promise<AssertionResult> {
-      const start = performance.now();
-      try {
-        const refs = [...references, ...(context?.references ?? [])];
-        const result = await analyzeHallucination(output, refs, options);
-
-        // Immediate fail on contradiction
-        if (failOnContradiction && result.statusCounts['contradicted'] > 0) {
-          const contradictions = result.flaggedClaims
-            .filter((c) => c.status === 'contradicted')
-            .map((c) => `"${c.claim.text.slice(0, 80)}"`)
-            .join('; ');
-          return {
-            status: 'fail',
-            name: '[Tier 1+2] output does not hallucinate',
-            message: `Output contradicts reference material: ${contradictions}`,
-            expected: 'No contradictions',
-            actual: `${result.statusCounts['contradicted']} contradiction(s)`,
-            evidence: result.summary,
-            durationMs: performance.now() - start,
-          };
-        }
-
-        // Check hallucination score
-        if (result.hallucinationScore > maxScore) {
-          return {
-            status: 'fail',
-            name: '[Tier 1+2] output does not hallucinate',
-            message: `Hallucination score ${(result.hallucinationScore * 100).toFixed(1)}% exceeds threshold ${(maxScore * 100).toFixed(1)}%`,
-            expected: `<= ${(maxScore * 100).toFixed(1)}% hallucination`,
-            actual: `${(result.hallucinationScore * 100).toFixed(1)}% hallucination`,
-            evidence: result.summary,
-            durationMs: performance.now() - start,
-          };
-        }
-
-        // Check ungrounded count
-        const ungroundedCount = result.statusCounts['ungrounded'] + result.statusCounts['contradicted'];
-        if (ungroundedCount > maxUngrounded) {
-          return {
-            status: 'fail',
-            name: '[Tier 1+2] output does not hallucinate',
-            message: `${ungroundedCount} ungrounded claims exceeds maximum of ${maxUngrounded}`,
-            expected: `<= ${maxUngrounded} ungrounded claims`,
-            actual: `${ungroundedCount} ungrounded claims`,
-            evidence: result.summary,
-            durationMs: performance.now() - start,
-          };
-        }
-
+  return makeHallucinationAssertion(
+    '[Tier 1+2] output does not hallucinate',
+    'Hallucination analysis',
+    references,
+    options,
+    (result) => {
+      // Immediate fail on contradiction
+      if (failOnContradiction && result.statusCounts['contradicted'] > 0) {
+        const contradictions = result.flaggedClaims
+          .filter((c) => c.status === 'contradicted')
+          .map((c) => `"${c.claim.text.slice(0, 80)}"`)
+          .join('; ');
         return {
-          status: 'pass',
-          name: '[Tier 1+2] output does not hallucinate',
+          status: 'fail',
+          message: `Output contradicts reference material: ${contradictions}`,
+          expected: 'No contradictions',
+          actual: `${result.statusCounts['contradicted']} contradiction(s)`,
           evidence: result.summary,
-          durationMs: performance.now() - start,
-        };
-      } catch (err) {
-        return {
-          status: 'error',
-          name: '[Tier 1+2] output does not hallucinate',
-          message: `Hallucination analysis failed: ${err instanceof Error ? err.message : String(err)}`,
-          durationMs: performance.now() - start,
         };
       }
+
+      // Check hallucination score
+      if (result.hallucinationScore > maxScore) {
+        return {
+          status: 'fail',
+          message: `Hallucination score ${(result.hallucinationScore * 100).toFixed(1)}% exceeds threshold ${(maxScore * 100).toFixed(1)}%`,
+          expected: `<= ${(maxScore * 100).toFixed(1)}% hallucination`,
+          actual: `${(result.hallucinationScore * 100).toFixed(1)}% hallucination`,
+          evidence: result.summary,
+        };
+      }
+
+      // Check ungrounded count
+      const ungroundedCount = result.statusCounts['ungrounded'] + result.statusCounts['contradicted'];
+      if (ungroundedCount > maxUngrounded) {
+        return {
+          status: 'fail',
+          message: `${ungroundedCount} ungrounded claims exceeds maximum of ${maxUngrounded}`,
+          expected: `<= ${maxUngrounded} ungrounded claims`,
+          actual: `${ungroundedCount} ungrounded claims`,
+          evidence: result.summary,
+        };
+      }
+
+      return {
+        status: 'pass',
+        evidence: result.summary,
+      };
     },
-  };
+  );
 }
 
 /**
@@ -166,50 +154,36 @@ export function toBeFullyGrounded(
   references: string[],
   options: HallucinationOptions = {},
 ): Assertion {
-  return {
-    name: '[Tier 1+2] all claims are grounded in references',
-    async evaluate(output: string, context?: EvalContext): Promise<AssertionResult> {
-      const start = performance.now();
-      try {
-        const refs = [...references, ...(context?.references ?? [])];
-        const result = await analyzeHallucination(output, refs, options);
+  return makeHallucinationAssertion(
+    '[Tier 1+2] all claims are grounded in references',
+    'Grounding analysis',
+    references,
+    options,
+    (result) => {
+      const ungrounded = result.verifications.filter(
+        (v) => v.status === 'ungrounded' || v.status === 'contradicted',
+      );
 
-        const ungrounded = result.verifications.filter(
-          (v) => v.status === 'ungrounded' || v.status === 'contradicted',
-        );
-
-        if (ungrounded.length > 0) {
-          const examples = ungrounded
-            .slice(0, 3)
-            .map((v) => `[${v.status}] "${v.claim.text.slice(0, 60)}..."`)
-            .join('\n');
-          return {
-            status: 'fail',
-            name: '[Tier 1+2] all claims are grounded in references',
-            message: `${ungrounded.length} claim(s) not grounded in references`,
-            expected: 'All claims grounded',
-            actual: `${ungrounded.length} ungrounded/contradicted`,
-            evidence: examples,
-            durationMs: performance.now() - start,
-          };
-        }
-
+      if (ungrounded.length > 0) {
+        const examples = ungrounded
+          .slice(0, 3)
+          .map((v) => `[${v.status}] "${v.claim.text.slice(0, 60)}..."`)
+          .join('\n');
         return {
-          status: 'pass',
-          name: '[Tier 1+2] all claims are grounded in references',
-          evidence: result.summary,
-          durationMs: performance.now() - start,
-        };
-      } catch (err) {
-        return {
-          status: 'error',
-          name: '[Tier 1+2] all claims are grounded in references',
-          message: `Grounding analysis failed: ${err instanceof Error ? err.message : String(err)}`,
-          durationMs: performance.now() - start,
+          status: 'fail',
+          message: `${ungrounded.length} claim(s) not grounded in references`,
+          expected: 'All claims grounded',
+          actual: `${ungrounded.length} ungrounded/contradicted`,
+          evidence: examples,
         };
       }
+
+      return {
+        status: 'pass',
+        evidence: result.summary,
+      };
     },
-  };
+  );
 }
 
 /**
@@ -226,48 +200,34 @@ export function toNotContradict(
   references: string[],
   options: HallucinationOptions = {},
 ): Assertion {
-  return {
-    name: '[Tier 2] output does not contradict references',
-    async evaluate(output: string, context?: EvalContext): Promise<AssertionResult> {
-      const start = performance.now();
-      try {
-        const refs = [...references, ...(context?.references ?? [])];
-        const result = await analyzeHallucination(output, refs, options);
+  return makeHallucinationAssertion(
+    '[Tier 2] output does not contradict references',
+    'Contradiction check',
+    references,
+    options,
+    (result) => {
+      const contradictions = result.verifications.filter((v) => v.status === 'contradicted');
 
-        const contradictions = result.verifications.filter((v) => v.status === 'contradicted');
-
-        if (contradictions.length > 0) {
-          const examples = contradictions
-            .slice(0, 3)
-            .map((v) => `"${v.claim.text.slice(0, 80)}" - ${v.reason ?? 'contradicts reference'}`)
-            .join('\n');
-          return {
-            status: 'fail',
-            name: '[Tier 2] output does not contradict references',
-            message: `${contradictions.length} contradiction(s) found`,
-            expected: 'No contradictions',
-            actual: `${contradictions.length} contradiction(s)`,
-            evidence: examples,
-            durationMs: performance.now() - start,
-          };
-        }
-
+      if (contradictions.length > 0) {
+        const examples = contradictions
+          .slice(0, 3)
+          .map((v) => `"${v.claim.text.slice(0, 80)}" - ${v.reason ?? 'contradicts reference'}`)
+          .join('\n');
         return {
-          status: 'pass',
-          name: '[Tier 2] output does not contradict references',
-          evidence: `Checked ${result.claims.length} claims, no contradictions found.`,
-          durationMs: performance.now() - start,
-        };
-      } catch (err) {
-        return {
-          status: 'error',
-          name: '[Tier 2] output does not contradict references',
-          message: `Contradiction check failed: ${err instanceof Error ? err.message : String(err)}`,
-          durationMs: performance.now() - start,
+          status: 'fail',
+          message: `${contradictions.length} contradiction(s) found`,
+          expected: 'No contradictions',
+          actual: `${contradictions.length} contradiction(s)`,
+          evidence: examples,
         };
       }
+
+      return {
+        status: 'pass',
+        evidence: `Checked ${result.claims.length} claims, no contradictions found.`,
+      };
     },
-  };
+  );
 }
 
 /**
@@ -283,34 +243,22 @@ export function toHaveHallucinationScoreBelow(
   maxScore = 0.3,
   options: HallucinationOptions = {},
 ): Assertion {
-  return {
-    name: `[Tier 1+2] hallucination score < ${(maxScore * 100).toFixed(0)}%`,
-    async evaluate(output: string, context?: EvalContext): Promise<AssertionResult> {
-      const start = performance.now();
-      try {
-        const refs = [...references, ...(context?.references ?? [])];
-        const result = await analyzeHallucination(output, refs, options);
-
-        const pass = result.hallucinationScore <= maxScore;
-        return {
-          status: pass ? 'pass' : 'fail',
-          name: `[Tier 1+2] hallucination score < ${(maxScore * 100).toFixed(0)}%`,
-          message: pass ? undefined : `Hallucination score ${(result.hallucinationScore * 100).toFixed(1)}% exceeds ${(maxScore * 100).toFixed(0)}%`,
-          expected: `<= ${(maxScore * 100).toFixed(0)}%`,
-          actual: `${(result.hallucinationScore * 100).toFixed(1)}%`,
-          evidence: result.summary,
-          durationMs: performance.now() - start,
-        };
-      } catch (err) {
-        return {
-          status: 'error',
-          name: `[Tier 1+2] hallucination score < ${(maxScore * 100).toFixed(0)}%`,
-          message: `Score check failed: ${err instanceof Error ? err.message : String(err)}`,
-          durationMs: performance.now() - start,
-        };
-      }
+  return makeHallucinationAssertion(
+    `[Tier 1+2] hallucination score < ${(maxScore * 100).toFixed(0)}%`,
+    'Score check',
+    references,
+    options,
+    (result) => {
+      const pass = result.hallucinationScore <= maxScore;
+      return {
+        status: pass ? 'pass' : 'fail',
+        message: pass ? undefined : `Hallucination score ${(result.hallucinationScore * 100).toFixed(1)}% exceeds ${(maxScore * 100).toFixed(0)}%`,
+        expected: `<= ${(maxScore * 100).toFixed(0)}%`,
+        actual: `${(result.hallucinationScore * 100).toFixed(1)}%`,
+        evidence: result.summary,
+      };
     },
-  };
+  );
 }
 
 /**
@@ -326,50 +274,36 @@ export function toHaveGroundingAbove(
   minGroundedPercent = 0.7,
   options: HallucinationOptions = {},
 ): Assertion {
-  return {
-    name: `[Tier 1+2] >= ${(minGroundedPercent * 100).toFixed(0)}% claims grounded`,
-    async evaluate(output: string, context?: EvalContext): Promise<AssertionResult> {
-      const start = performance.now();
-      try {
-        const refs = [...references, ...(context?.references ?? [])];
-        const result = await analyzeHallucination(output, refs, options);
+  return makeHallucinationAssertion(
+    `[Tier 1+2] >= ${(minGroundedPercent * 100).toFixed(0)}% claims grounded`,
+    'Grounding check',
+    references,
+    options,
+    (result) => {
+      const verifiable = result.verifications.filter(
+        (v) => v.status !== 'unverifiable' && v.status !== 'self-referential',
+      );
 
-        const verifiable = result.verifications.filter(
-          (v) => v.status !== 'unverifiable' && v.status !== 'self-referential',
-        );
-
-        if (verifiable.length === 0) {
-          return {
-            status: 'pass',
-            name: `[Tier 1+2] >= ${(minGroundedPercent * 100).toFixed(0)}% claims grounded`,
-            evidence: 'No verifiable claims found (vacuously true).',
-            durationMs: performance.now() - start,
-          };
-        }
-
-        const grounded = verifiable.filter(
-          (v) => v.status === 'grounded' || v.status === 'partially-grounded',
-        );
-        const groundedPercent = grounded.length / verifiable.length;
-        const pass = groundedPercent >= minGroundedPercent;
-
+      if (verifiable.length === 0) {
         return {
-          status: pass ? 'pass' : 'fail',
-          name: `[Tier 1+2] >= ${(minGroundedPercent * 100).toFixed(0)}% claims grounded`,
-          message: pass ? undefined : `Only ${(groundedPercent * 100).toFixed(1)}% of claims are grounded`,
-          expected: `>= ${(minGroundedPercent * 100).toFixed(0)}%`,
-          actual: `${(groundedPercent * 100).toFixed(1)}% (${grounded.length}/${verifiable.length})`,
-          evidence: result.summary,
-          durationMs: performance.now() - start,
-        };
-      } catch (err) {
-        return {
-          status: 'error',
-          name: `[Tier 1+2] >= ${(minGroundedPercent * 100).toFixed(0)}% claims grounded`,
-          message: `Grounding check failed: ${err instanceof Error ? err.message : String(err)}`,
-          durationMs: performance.now() - start,
+          status: 'pass',
+          evidence: 'No verifiable claims found (vacuously true).',
         };
       }
+
+      const grounded = verifiable.filter(
+        (v) => v.status === 'grounded' || v.status === 'partially-grounded',
+      );
+      const groundedPercent = grounded.length / verifiable.length;
+      const pass = groundedPercent >= minGroundedPercent;
+
+      return {
+        status: pass ? 'pass' : 'fail',
+        message: pass ? undefined : `Only ${(groundedPercent * 100).toFixed(1)}% of claims are grounded`,
+        expected: `>= ${(minGroundedPercent * 100).toFixed(0)}%`,
+        actual: `${(groundedPercent * 100).toFixed(1)}% (${grounded.length}/${verifiable.length})`,
+        evidence: result.summary,
+      };
     },
-  };
+  );
 }

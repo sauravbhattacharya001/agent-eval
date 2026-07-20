@@ -19,6 +19,11 @@
 
 import { describe, it, expect } from 'vitest';
 
+// Assertion-shell seam — imported directly from its new home.
+import {
+  makeHallucinationAssertion as makeHallucinationAssertionSeam,
+} from '../src/checks/hallucination-assert.js';
+
 // Seam modules — imported directly from their new homes.
 import {
   extractClaims as extractClaimsSeam,
@@ -35,6 +40,8 @@ import {
 
 // Public barrel — what consumers import.
 import {
+  makeHallucinationAssertion,
+  toNotHallucinate,
   extractClaims,
   wordOverlap,
   findBestMatch,
@@ -76,6 +83,10 @@ describe('hallucination.ts re-exports the same references as its seams', () => {
 
   it('built-in rubric is the same object via barrel and seam', () => {
     expect(HALLUCINATION_RUBRIC).toBe(HALLUCINATION_RUBRIC_SEAM);
+  });
+
+  it('assertion-shell seam (hallucination-assert.ts)', () => {
+    expect(makeHallucinationAssertion).toBe(makeHallucinationAssertionSeam);
   });
 
   it('types seam is structurally compatible with the barrel re-export', () => {
@@ -179,5 +190,65 @@ describe('analysis seam: analyzeHallucination rolls verdicts into a score', () =
   it('exposes the built-in rubric with a grounding criterion', () => {
     expect(HALLUCINATION_RUBRIC_SEAM.name).toMatch(/hallucination/i);
     expect(HALLUCINATION_RUBRIC_SEAM.criteria.some((c) => c.id === 'grounding')).toBe(true);
+  });
+});
+
+describe('assert seam: makeHallucinationAssertion owns the shared shell', () => {
+  it('stamps the name + a numeric duration onto the decision result', async () => {
+    const assertion = makeHallucinationAssertionSeam(
+      'custom name',
+      'Custom check',
+      ['the answer is 42'],
+      {},
+      () => ({ status: 'pass', evidence: 'ok' }),
+    );
+    expect(assertion.name).toBe('custom name');
+    const res = await assertion.evaluate('the answer is 42');
+    expect(res.status).toBe('pass');
+    expect(res.name).toBe('custom name');
+    expect(res.evidence).toBe('ok');
+    expect(typeof res.durationMs).toBe('number');
+    expect(res.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('merges caller references with context references (caller first)', async () => {
+    const assertion = makeHallucinationAssertionSeam(
+      'ref-merge',
+      'Ref check',
+      ['caller-ref'],
+      {},
+      (result) => {
+        void result;
+        return { status: 'pass' };
+      },
+    );
+    const res = await assertion.evaluate('unrelated text', { references: ['context-ref'] });
+    expect(res.status).toBe('pass');
+  });
+
+  it('translates a thrown analysis error into an error result with the verb', async () => {
+    const assertion = makeHallucinationAssertionSeam(
+      'boom',
+      'Explosive check',
+      ['ref'],
+      {},
+      () => {
+        throw new Error('kaboom');
+      },
+    );
+    const res = await assertion.evaluate('some output');
+    expect(res.status).toBe('error');
+    expect(res.message).toBe('Explosive check failed: kaboom');
+    expect(res.name).toBe('boom');
+    expect(typeof res.durationMs).toBe('number');
+  });
+
+  it('the barrel factories flow through the shell (name + duration present)', async () => {
+    const res = await toNotHallucinate(['the cache holds 256 entries']).evaluate(
+      'the cache holds 256 entries',
+    );
+    expect(res.name).toBe('[Tier 1+2] output does not hallucinate');
+    expect(typeof res.durationMs).toBe('number');
+    expect(res.status).toBe('pass');
   });
 });

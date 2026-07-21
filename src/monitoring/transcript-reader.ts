@@ -28,10 +28,13 @@ import type {
   ParseTranscriptOptions,
   OutcomeStatus,
   Transcript,
-  TranscriptIdentity,
   TranscriptSection,
-  WorkerName,
 } from './types.js';
+
+// Identity inference (worker name + start timestamp from the filename, plus
+// the Pacific-Time DST offset math) lives in its own module - a self-contained
+// cluster of filename/timezone helpers. Imported here for `parseTranscript`.
+import { inferIdentity } from './transcript-identity.js';
 
 // The natural-language `## Duration` grammar lives in its own module (the
 // subtlest sub-parser here). Re-exported below so `parseDuration` keeps its
@@ -287,115 +290,9 @@ export function parseOutcome(body: string): OutcomeStatus {
 
 // ─── INTERNAL ──────────────────────────────────────────────────────────────────
 
-/**
- * Build a {@link TranscriptIdentity} by combining the heading title and the
- * filename hint. We trust the filename for the start timestamp because it is
- * generated programmatically; the title is used only as a fallback for the
- * worker name.
- */
-function inferIdentity(
-  title: string,
-  options: ParseTranscriptOptions,
-  warnings: string[],
-): TranscriptIdentity {
-  const filename = options.filename ?? '';
-  const baseFilename = basenameOf(filename);
-
-  // Filenames are `YYYY-MM-DD-HHmm.md`.
-  const fileMatch = /^(\d{4}-\d{2}-\d{2})-(\d{2})(\d{2})\.md$/i.exec(baseFilename);
-  let date = '';
-  let time = '';
-  if (fileMatch) {
-    date = fileMatch[1] ?? '';
-    const hh = fileMatch[2] ?? '00';
-    const mm = fileMatch[3] ?? '00';
-    time = `${hh}:${mm}`;
-  } else if (baseFilename) {
-    warnings.push(`Filename "${baseFilename}" does not match YYYY-MM-DD-HHmm.md`);
-  }
-
-  const tz = resolveTimezone(date, options.defaultTimezone);
-  let startedAt = '';
-  let startedAtMs = Number.NaN;
-  if (date && time) {
-    startedAt = `${date}T${time}:00${tz}`;
-    const parsed = Date.parse(startedAt);
-    startedAtMs = Number.isNaN(parsed) ? Number.NaN : parsed;
-  }
-
-  // Worker inference order: explicit option → filename's parent dir → title prefix.
-  let worker: WorkerName = options.worker ?? '';
-  if (!worker) {
-    const dirWorker = parentDirectoryName(filename);
-    if (dirWorker) worker = dirWorker;
-  }
-  if (!worker && title) {
-    const titleMatch = /^([A-Za-z][A-Za-z0-9_\- ]*?)\s+Run\b/i.exec(title);
-    if (titleMatch && titleMatch[1]) {
-      worker = titleMatch[1].toLowerCase().replace(/\s+/g, '-');
-    }
-  }
-  if (!worker) worker = 'unknown';
-
-  return {
-    worker,
-    startedAt,
-    startedAtMs,
-    filename: baseFilename,
-    date,
-    time,
-  };
-}
-
-function resolveTimezone(date: string, override?: string | 'auto'): string {
-  if (override && override !== 'auto') return override;
-  if (override === 'auto' && date) {
-    return inferPacificOffset(date);
-  }
-  return '-07:00';
-}
-
-/**
- * Approximate Pacific Time DST offset. PDT (UTC-7) ≈ second Sunday of March
- * to first Sunday of November; PST (UTC-8) the rest of the year. Sufficient
- * for transcript timestamps which only need minute-level accuracy.
- */
-function inferPacificOffset(date: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-  if (!m) return '-07:00';
-  const year = parseInt(m[1] ?? '0', 10);
-  const month = parseInt(m[2] ?? '0', 10);
-  const day = parseInt(m[3] ?? '0', 10);
-  // Crude: March (post-second-Sunday) through October is PDT.
-  if (month > 3 && month < 11) return '-07:00';
-  if (month < 3 || month > 11) return '-08:00';
-  // March/November - approximate Sunday boundaries.
-  // Second Sunday of March:
-  if (month === 3) {
-    const firstDow = new Date(Date.UTC(year, 2, 1)).getUTCDay();
-    const secondSunday = 1 + ((7 - firstDow) % 7) + 7;
-    return day >= secondSunday ? '-07:00' : '-08:00';
-  }
-  // First Sunday of November:
-  const firstDow = new Date(Date.UTC(year, 10, 1)).getUTCDay();
-  const firstSunday = 1 + ((7 - firstDow) % 7);
-  return day < firstSunday ? '-07:00' : '-08:00';
-}
-
-function basenameOf(p: string): string {
-  if (!p) return '';
-  const norm = p.replace(/\\/g, '/');
-  const idx = norm.lastIndexOf('/');
-  return idx === -1 ? norm : norm.slice(idx + 1);
-}
-
-function parentDirectoryName(p: string): string {
-  if (!p) return '';
-  const norm = p.replace(/\\/g, '/');
-  const segments = norm.split('/').filter((s) => s.length > 0);
-  if (segments.length < 2) return '';
-  return (segments[segments.length - 2] ?? '').toLowerCase();
-}
+// Identity inference (`inferIdentity` + its filename/timezone helpers) now
+// lives in `./transcript-identity.ts`; it is imported at the top of this
+// module. What remains here is the errors-body triviality heuristic.
 
 /**
  * The errors body conventionally says "no errors" / "none" when nothing went

@@ -10,7 +10,11 @@
  * The orchestration that resolves options, assembles the {@link CheckScore}
  * rows, and computes the roll-up lives in `scorer.ts`; the persistence shape
  * lives in `scores-store.ts`. This file is the reproducible scoring core both
- * of them lean on.
+ * of them lean on. The non-scoring scaffolding (default budgets, the shared
+ * {@link CheckOutcome} shape, and the {@link resolveTimeout} /
+ * {@link resolveRunMetadata} option resolvers) lives in
+ * `scorer-check-support.ts` and is re-exported here so consumers keep a single
+ * import site.
  *
  * Independence note (the core axis is independent → corruptible): every check
  * here is Tier 1 or Tier 2. The transcript is an artifact the worker wrote, but
@@ -25,50 +29,20 @@
 import { checkCompleteness } from '../checks/completeness.js';
 import { analyzeStaleness, formatDuration } from '../checks/staleness.js';
 
-import type { RunMetadata, ScoreStatus, ScoreTranscriptOptions } from './scorer-types.js';
+import type { CheckOutcome } from './scorer-check-support.js';
+import type { RunMetadata, ScoreStatus } from './scorer-types.js';
 import { transcriptToTimeline } from './timeline-bridge.js';
 import type { Transcript, OutcomeStatus } from './types.js';
 
-// ─── CONSTANTS ──────────────────────────────────────────────────────────────────
-
-/** Default minimum deliverable word count before completeness is penalized. */
-export const DEFAULT_MIN_OUTPUT_WORDS = 20;
-
-/** Default per-worker timeout budgets (ms). Conservative, used only if caller
- * does not supply their own. These mirror the cron cadence headroom — a run
- * that blows well past these is genuinely anomalous, not just slow. */
-export const DEFAULT_TIMEOUT_BUDGETS: Readonly<Record<string, number>> = {
-  builder: 60 * 60_000,
-  gardener: 60 * 60_000,
-  sentinel: 45 * 60_000,
-  eval: 45 * 60_000,
-  blog: 45 * 60_000,
-  tempcheck: 20 * 60_000,
-  scrubme: 20 * 60_000,
-};
-
-/** Known own-keys of a {@link RunMetadata} record, used to tell a single record
- * apart from a runId-keyed map. */
-const RUN_METADATA_KEYS = ['exitStatus', 'startedAt', 'endedAt', 'durationMs', 'exitCode'] as const;
-
-// ─── SHARED RESULT SHAPE ──────────────────────────────────────────────────────────
-
-/**
- * The result of one individual check scorer. The orchestrator ({@link
- * scoreTranscript}) merges this with the row identity to build a
- * {@link CheckScore}. `detail` is always present (possibly empty) so callers
- * never have to null-check it.
- */
-export interface CheckOutcome {
-  /** Normalized score in [0, 1] where 1 is best. */
-  score: number;
-  /** Verdict derived from the score + the check's own pass criteria. */
-  status: ScoreStatus;
-  /** Short human-readable explanation of the score. */
-  summary: string;
-  /** Structured detail (counts, sub-scores) for debugging/trends. */
-  detail: Record<string, number | string | boolean>;
-}
+// Re-export the check-support surface so callers (scorer.ts, tests) keep a
+// single import site for the per-check engine and its scaffolding.
+export type { CheckOutcome } from './scorer-check-support.js';
+export {
+  DEFAULT_MIN_OUTPUT_WORDS,
+  DEFAULT_TIMEOUT_BUDGETS,
+  resolveRunMetadata,
+  resolveTimeout,
+} from './scorer-check-support.js';
 
 // ─── INTERNAL HELPERS ────────────────────────────────────────────────────────────
 
@@ -83,41 +57,6 @@ function clamp01(n: number): number {
   if (n < 0) return 0;
   if (n > 1) return 1;
   return n;
-}
-
-/** Resolve the timeout budget for a worker from the options. */
-export function resolveTimeout(
-  worker: string,
-  opt: ScoreTranscriptOptions['timeoutMs'],
-): number | undefined {
-  if (typeof opt === 'number') return opt;
-  if (opt && typeof opt === 'object') {
-    const v = opt[worker];
-    if (typeof v === 'number') return v;
-    return undefined;
-  }
-  // Fall back to built-in defaults.
-  return DEFAULT_TIMEOUT_BUDGETS[worker];
-}
-
-/**
- * Resolve the {@link RunMetadata} for a run from the options. Accepts either a
- * single record (applied to the scored transcript) or a map keyed by runId
- * (filename without `.md`); falls back to a `worker`-keyed entry for
- * convenience. Returns undefined when nothing matches.
- */
-export function resolveRunMetadata(
-  runId: string,
-  worker: string,
-  opt: ScoreTranscriptOptions['runMetadata'],
-): RunMetadata | undefined {
-  if (!opt || typeof opt !== 'object') return undefined;
-  // A single RunMetadata record has at least one of its own known keys.
-  const looksLikeSingle = RUN_METADATA_KEYS.some((k) => k in opt);
-  if (looksLikeSingle) return opt as RunMetadata;
-  const map = opt as Readonly<Record<string, RunMetadata>>;
-  // Try, in order: exact runId (basename), `worker/runId`, then worker.
-  return map[runId] ?? map[`${worker}/${runId}`] ?? map[worker];
 }
 
 /** Coerce an ISO string or epoch-ms value to epoch ms, or undefined. */

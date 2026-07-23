@@ -50,6 +50,12 @@ import {
   callGemini,
 } from './agent-backends.js';
 
+// The per-turn tool-dispatch step lives in a sibling leaf module so this file
+// carries only loop control (iteration, timeout, stop-reason). It runs each
+// requested tool call against the tool map and returns the captured calls,
+// timeline events, and `tool` messages to splice back in. See ./agent-loop.ts.
+import { executeToolCalls } from './agent-loop.js';
+
 export type {
   ToolDefinition,
   CapturedToolCall,
@@ -235,52 +241,11 @@ export class AgentProvider implements EvalProvider {
           tool_calls: choice.message.tool_calls,
         });
 
-        // Execute each tool call
-        for (const tc of choice.message.tool_calls) {
-          const toolStart = Date.now();
-          const toolDef = this.toolMap.get(tc.function.name);
-
-          events.push({
-            type: 'tool_call',
-            timestamp: new Date().toISOString(),
-            content: `${tc.function.name}(${tc.function.arguments})`,
-          });
-
-          let toolResult: string;
-          if (!toolDef) {
-            toolResult = `Error: Unknown tool "${tc.function.name}"`;
-          } else {
-            try {
-              const args = JSON.parse(tc.function.arguments);
-              toolResult = await toolDef.execute(args);
-            } catch (err) {
-              toolResult = `Error: ${err instanceof Error ? err.message : String(err)}`;
-            }
-          }
-
-          const toolDuration = Date.now() - toolStart;
-
-          toolCalls.push({
-            name: tc.function.name,
-            arguments: JSON.parse(tc.function.arguments || '{}'),
-            result: toolResult,
-            durationMs: toolDuration,
-            timestamp: new Date(toolStart).toISOString(),
-          });
-
-          events.push({
-            type: 'tool_result',
-            timestamp: new Date().toISOString(),
-            content: `${tc.function.name}: ${toolResult.slice(0, 500)}`,
-          });
-
-          // Add tool result to conversation
-          messages.push({
-            role: 'tool',
-            content: toolResult,
-            tool_call_id: tc.id,
-          });
-        }
+        // Execute each tool call (dispatch delegated to ./agent-loop.ts)
+        const dispatch = await executeToolCalls(choice.message.tool_calls, this.toolMap);
+        toolCalls.push(...dispatch.capturedCalls);
+        events.push(...dispatch.events);
+        messages.push(...dispatch.toolMessages);
       } else {
         // No tool calls — add assistant message and we're done
         messages.push({ role: 'assistant', content: choice.message.content ?? '' });

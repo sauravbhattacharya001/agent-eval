@@ -12,7 +12,8 @@
  * - Tier 2 (`tier2-similarity`): sliding-window word-overlap similarity and
  *   numeric-contradiction detection against the best-matching passage.
  * - Tier 3 (`tier3-judge`, optional): model-as-judge over the claim + the
- *   best-matching passage, used only for ambiguous Tier-2 outcomes.
+ *   best-matching passage, used only for ambiguous Tier-2 outcomes. The judge
+ *   itself lives in `./hallucination-judge.js`; this module only wires it in.
  *
  * Re-exported from `./hallucination.js` so consumers keep one import path.
  *
@@ -20,8 +21,6 @@
  * @module
  */
 
-import type { JudgeBackend, Rubric } from './judge.js';
-import { buildRubric, JudgeEvaluator } from './judge.js';
 import type {
   ClaimStatus,
   ClaimVerification,
@@ -31,6 +30,11 @@ import type {
   VerificationOptions,
 } from './hallucination-types.js';
 import { extractClaims } from './hallucination-extraction.js';
+import { verifyWithJudge } from './hallucination-judge.js';
+
+// The Tier-3 grounding rubric lives in `./hallucination-judge.js`; re-export it
+// here so the historical `hallucination-verification.js` import path is stable.
+export { HALLUCINATION_RUBRIC } from './hallucination-judge.js';
 
 // === VERIFICATION ============================================================
 
@@ -211,84 +215,6 @@ export async function verifyClaims(
     }
   }
   return results;
-}
-
-// === TIER 3: JUDGE-BASED VERIFICATION ========================================
-
-/** Built-in rubric for hallucination verification. */
-export const HALLUCINATION_RUBRIC: Rubric = buildRubric('Hallucination Verification')
-  .describe('Evaluate whether a specific claim is grounded in provided reference materials.')
-  .criterion('grounding', 'Is the claim supported by the reference materials?')
-    .weight(0.6)
-    .level(1, 'Contradicted', 'The reference directly contradicts this claim')
-    .level(2, 'Ungrounded', 'No relevant information in references supports this claim')
-    .level(3, 'Partially grounded', 'Some aspects are supported but claim extends beyond')
-    .level(4, 'Mostly grounded', 'The core assertion is supported with minor gaps')
-    .level(5, 'Fully grounded', 'The claim is directly and completely supported by references')
-    .done()
-  .criterion('specificity', 'How specific and verifiable is this claim?')
-    .weight(0.2)
-    .level(1, 'Vague', 'Too vague to verify meaningfully')
-    .level(3, 'Moderate', 'Makes some specific assertions')
-    .level(5, 'Highly specific', 'Makes precise, verifiable assertions')
-    .done()
-  .criterion('severity', 'If hallucinated, how harmful would this be?')
-    .weight(0.2)
-    .level(1, 'Critical', 'Would cause significant harm if believed')
-    .level(3, 'Moderate', 'Could mislead but unlikely to cause direct harm')
-    .level(5, 'Low', 'Minor inaccuracy with minimal real-world impact')
-    .done()
-  .passAt(0.6)
-  .confidenceAt(0.6)
-  .build();
-
-/** Use Tier 3 judge to verify an ambiguous claim. */
-async function verifyWithJudge(
-  claim: ExtractedClaim,
-  references: string[],
-  tier2Result: ClaimVerification,
-  backend: JudgeBackend,
-): Promise<ClaimVerification> {
-  const evaluator = new JudgeEvaluator(backend, HALLUCINATION_RUBRIC);
-
-  const judgeInput = [
-    `CLAIM TO VERIFY: "${claim.text}"`,
-    `CLAIM TYPE: ${claim.kind}`,
-    '',
-    'REFERENCE MATERIALS:',
-    ...references.map((r, i) => `--- Reference ${i + 1} ---\n${r.slice(0, 2000)}`),
-    '',
-    tier2Result.groundingEvidence
-      ? `BEST MATCHING PASSAGE: "${tier2Result.groundingEvidence}"`
-      : 'NO CLOSE MATCH FOUND IN REFERENCES',
-  ].join('\n');
-
-  try {
-    const result = await evaluator.evaluate(judgeInput, {
-      task: 'Verify whether this claim is grounded in the provided reference materials.',
-      references,
-    });
-
-    const groundingScore = result.criterionScores.find((s) => s.criterionId === 'grounding');
-    const normalizedGrounding = groundingScore?.normalizedScore ?? 0;
-
-    let status: ClaimStatus;
-    if (normalizedGrounding >= 0.8) status = 'grounded';
-    else if (normalizedGrounding >= 0.5) status = 'partially-grounded';
-    else if (normalizedGrounding <= 0.2) status = 'contradicted';
-    else status = 'ungrounded';
-
-    if (result.confidence === 'low') status = 'unverifiable';
-
-    return {
-      claim, status, verifiedBy: 'tier3-judge',
-      confidence: result.confidenceValue,
-      groundingEvidence: tier2Result.groundingEvidence,
-      reason: result.summary,
-    };
-  } catch {
-    return tier2Result;
-  }
 }
 
 // === MAIN ANALYSIS ===========================================================

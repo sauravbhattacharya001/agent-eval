@@ -37,6 +37,9 @@ import {
   analyzeHallucination as analyzeHallucinationSeam,
   HALLUCINATION_RUBRIC as HALLUCINATION_RUBRIC_SEAM,
 } from '../src/checks/hallucination-verification.js';
+import {
+  HALLUCINATION_RUBRIC as HALLUCINATION_RUBRIC_JUDGE_SEAM,
+} from '../src/checks/hallucination-judge.js';
 
 // Public barrel — what consumers import.
 import {
@@ -83,6 +86,13 @@ describe('hallucination.ts re-exports the same references as its seams', () => {
 
   it('built-in rubric is the same object via barrel and seam', () => {
     expect(HALLUCINATION_RUBRIC).toBe(HALLUCINATION_RUBRIC_SEAM);
+  });
+
+  it('judge seam (hallucination-judge.ts) owns the rubric the verification seam re-exports', () => {
+    // The Tier-3 rubric now lives in hallucination-judge.ts; hallucination-verification.ts
+    // must re-export the SAME object so the historical import path cannot diverge.
+    expect(HALLUCINATION_RUBRIC_SEAM).toBe(HALLUCINATION_RUBRIC_JUDGE_SEAM);
+    expect(HALLUCINATION_RUBRIC).toBe(HALLUCINATION_RUBRIC_JUDGE_SEAM);
   });
 
   it('assertion-shell seam (hallucination-assert.ts)', () => {

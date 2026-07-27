@@ -128,26 +128,17 @@ export function toNotContainKeywords(
     name,
     evaluate(output: string): AssertionResult {
       const start = performance.now();
-      const caseSensitive = options?.caseSensitive ?? false;
-      const wholeWord = options?.wholeWord ?? true;
-      const found: string[] = [];
-
-      for (const keyword of keywords) {
-        let isPresent: boolean;
-        if (wholeWord) {
-          const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          const flags = caseSensitive ? '' : 'i';
-          const pattern = new RegExp(`\\b${escaped}\\b`, flags);
-          isPresent = pattern.test(output);
-        } else {
-          const normalizedOutput = caseSensitive ? output : output.toLowerCase();
-          const normalizedKeyword = caseSensitive ? keyword : keyword.toLowerCase();
-          isPresent = normalizedOutput.includes(normalizedKeyword);
-        }
-        if (isPresent) {
-          found.push(keyword);
-        }
-      }
+      // Reuse the deterministic engine's presence matching rather than a
+      // second inline copy: the keywords "present" in the coverage result are
+      // exactly the forbidden keywords that were found. `wholeWord` defaults to
+      // true here (constraint-exclusion semantics), so it is always passed
+      // explicitly and never relies on the engine's own default.
+      const coverage = calculateKeywordCoverage(output, {
+        keywords,
+        caseSensitive: options?.caseSensitive ?? false,
+        wholeWord: options?.wholeWord ?? true,
+      });
+      const found = coverage.present;
 
       if (found.length === 0) {
         return {

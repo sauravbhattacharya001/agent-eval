@@ -14,8 +14,9 @@
  * assertion factories that wrap the detectors into Jest/Vitest-style assertions.
  * The supporting seams live alongside it and are re-exported here so the public
  * surface stays a single `./repetition.js` import path:
- * - `./repetition-types.js`    - the type vocabulary (options, instances, results)
- * - `./repetition-analysis.js` - normalize/split/similarity + the 4 detectors
+ * - `./repetition-types.js`     - the type vocabulary (options, instances, results)
+ * - `./repetition-detectors.js` - the three primitive detectors
+ * - `./repetition-analysis.js`  - the combined `analyzeFullRepetition` orchestrator
  *
  * @tier 2 - Heuristic (no AI, detects behavioral patterns)
  * @module
@@ -53,8 +54,10 @@ export type {
 } from './repetition-types.js';
 
 // ---- ANALYSIS RE-EXPORTS ----
-// The pure text-analysis engine (normalize/split/similarity + the 4 detectors)
-// lives alongside in ./repetition-analysis.js.
+// The pure text-analysis engine lives alongside: the three primitive detectors
+// in ./repetition-detectors.js and the combined orchestrator in
+// ./repetition-analysis.js, which re-exports the detectors so this barrel keeps
+// a single import path.
 export {
   splitSentences,
   splitParagraphs,

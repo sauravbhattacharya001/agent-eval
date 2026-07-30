@@ -282,6 +282,17 @@ describe('AgentProvider', () => {
       expect(ctx.metadata.turns).toBe(result.turns);
       expect(ctx.metadata.tokens).toBe(result.totalTokens);
     });
+
+    it('recovers the original task prompt from the run timeline', async () => {
+      mockFetch([{ content: 'Done' }]);
+      const provider = new AgentProvider(baseConfig);
+      const result = await provider.run('refactor the auth module');
+
+      const ctx = agentContext(result);
+      // Tier 2/3 assertions read context.prompt as the task; it must be the
+      // real prompt (carried on the timeline start event), not an empty string.
+      expect(ctx.prompt).toBe('refactor the auth module');
+    });
   });
 });
 

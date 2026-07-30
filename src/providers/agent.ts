@@ -390,9 +390,16 @@ export function agentContext(run: AgentRunResult): {
   prompt: string;
   metadata: { timeline: RunTimeline; turns: AgentTurn[]; tokens: AgentRunResult['totalTokens'] };
 } {
-  const firstUserMessage = run.turns.length > 0 ? '' : '';
+  // Recover the original task prompt from the run timeline. The agentic loop
+  // records it as the `content` of the `start` event (see run() above), so it is
+  // always available here even though AgentRunResult has no dedicated prompt
+  // field. Tier 2/3 assertions (drift, actionability, relevance) read
+  // context.prompt as the task, so handing them the real prompt — rather than an
+  // empty string — is what makes those checks meaningful off an agent run.
+  const startEvent = run.timeline.events?.find((e) => e.type === 'start');
+  const prompt = startEvent?.content ?? '';
   return {
-    prompt: firstUserMessage,
+    prompt,
     metadata: {
       timeline: run.timeline,
       turns: run.turns,

@@ -107,6 +107,90 @@ describe('CLI Argument Parsing', () => {
   });
 });
 
+describe('CLI Argument Parsing - triage command', () => {
+  it('parses triage command with a trace path', () => {
+    const result = parseCliArgs(['node', 'agent-eval', 'triage', './traces']);
+    expect(result).not.toBeNull();
+    expect(result!.command).toBe('triage');
+    expect(result!.paths).toEqual(['./traces']);
+  });
+
+  it('parses --format agentlens', () => {
+    const result = parseCliArgs(['node', 'agent-eval', 'triage', './traces', '--format', 'agentlens']);
+    expect(result!.format).toBe('agentlens');
+  });
+
+  it('parses --format otlp and langsmith', () => {
+    expect(parseCliArgs(['node', 'agent-eval', 'triage', 't', '--format', 'otlp'])!.format).toBe('otlp');
+    expect(parseCliArgs(['node', 'agent-eval', 'triage', 't', '--format', 'langsmith'])!.format).toBe('langsmith');
+  });
+
+  it('ignores an unrecognized --format value (leaves format unset)', () => {
+    const result = parseCliArgs(['node', 'agent-eval', 'triage', './traces', '--format', 'bogus']);
+    expect(result!.format).toBeUndefined();
+  });
+
+  it('parses a positive --dollars-per-mtok value', () => {
+    const result = parseCliArgs(['node', 'agent-eval', 'triage', './traces', '--dollars-per-mtok', '3.5']);
+    expect(result!.dollarsPerMillionTokens).toBe(3.5);
+  });
+
+  it('ignores a non-numeric --dollars-per-mtok value', () => {
+    const result = parseCliArgs(['node', 'agent-eval', 'triage', './traces', '--dollars-per-mtok', 'abc']);
+    expect(result!.dollarsPerMillionTokens).toBeUndefined();
+  });
+
+  it('ignores a non-positive --dollars-per-mtok value', () => {
+    const result = parseCliArgs(['node', 'agent-eval', 'triage', './traces', '--dollars-per-mtok', '0']);
+    expect(result!.dollarsPerMillionTokens).toBeUndefined();
+  });
+
+  it('parses --json on triage', () => {
+    const result = parseCliArgs(['node', 'agent-eval', 'triage', './traces', '--json']);
+    expect(result!.json).toBe(true);
+  });
+
+  it('collects multiple positional trace paths and skips flags', () => {
+    const result = parseCliArgs(['node', 'agent-eval', 'triage', './a', './b', '--json']);
+    expect(result!.paths).toEqual(['./a', './b']);
+  });
+});
+
+describe('CLI Argument Parsing - validate command', () => {
+  it('parses validate command with a path', () => {
+    const result = parseCliArgs(['node', 'agent-eval', 'validate', './transcripts']);
+    expect(result).not.toBeNull();
+    expect(result!.command).toBe('validate');
+    expect(result!.paths).toEqual(['./transcripts']);
+  });
+
+  it('parses --json on validate', () => {
+    const result = parseCliArgs(['node', 'agent-eval', 'validate', './transcripts', '--json']);
+    expect(result!.json).toBe(true);
+  });
+
+  it('parses --finished flag', () => {
+    const result = parseCliArgs(['node', 'agent-eval', 'validate', './transcripts', '--finished']);
+    expect(result!.finished).toBe(true);
+  });
+
+  it('treats --strict as an alias for --finished', () => {
+    const result = parseCliArgs(['node', 'agent-eval', 'validate', './transcripts', '--strict']);
+    expect(result!.finished).toBe(true);
+  });
+
+  it('defaults json and finished to false', () => {
+    const result = parseCliArgs(['node', 'agent-eval', 'validate', './transcripts']);
+    expect(result!.json).toBe(false);
+    expect(result!.finished).toBe(false);
+  });
+
+  it('collects multiple positional paths and skips unknown flags', () => {
+    const result = parseCliArgs(['node', 'agent-eval', 'validate', './a', './b', '--json', '--finished']);
+    expect(result!.paths).toEqual(['./a', './b']);
+  });
+});
+
 describe('Spec Discovery', () => {
   const tmpDir = resolve('./test-specs-discovery-tmp');
 

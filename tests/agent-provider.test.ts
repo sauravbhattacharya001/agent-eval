@@ -232,6 +232,52 @@ describe('AgentProvider', () => {
       expect(result.error).toContain('429');
       expect(result.completed).toBe(false);
     });
+
+    it('stops with a timeout stopReason when maxDurationMs is exceeded', async () => {
+      // A negative budget guarantees the very first iteration's elapsed-time
+      // guard (`elapsed > maxDurationMs`) trips before any LLM call. The fetch
+      // mock is armed but must never be consulted — the loop must break on the
+      // wall-clock guard, not on a model response.
+      mockFetch([{ content: 'should never be read', finish_reason: 'stop' }]);
+      const provider = new AgentProvider({ ...baseConfig, maxDurationMs: -1 });
+
+      const result = await provider.run('Long task');
+
+      expect(result.stopReason).toBe('timeout');
+      expect(result.completed).toBe(false);
+      // No turn was ever taken (we broke before the first LLM call)...
+      expect(result.turns).toHaveLength(0);
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+      // ...and the timeout is surfaced as an error event on the timeline,
+      // sequenced between start and end, so staleness/timeout checks can see it.
+      const types = (result.timeline.events ?? []).map((e) => e.type);
+      expect(types[0]).toBe('start');
+      expect(types[types.length - 1]).toBe('end');
+      const errorEvent = (result.timeline.events ?? []).find((e) => e.type === 'error');
+      expect(errorEvent?.content).toMatch(/^Timeout after \d+ms$/);
+      // The end event still records the final stop reason as its content.
+      expect((result.timeline.events ?? []).at(-1)?.content).toBe('timeout');
+    });
+
+    it('stops with an error when the LLM response contains no choices', async () => {
+      // A syntactically-valid 200 response with an empty `choices` array is a
+      // real failure mode (some gateways return this on a filtered/blocked
+      // prompt). The loop must treat it as an error, not crash on `choices[0]`.
+      globalThis.fetch = vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ choices: [], usage: { prompt_tokens: 1, completion_tokens: 0, total_tokens: 1 } }),
+      })) as unknown as typeof fetch;
+      const provider = new AgentProvider(baseConfig);
+
+      const result = await provider.run('Blocked prompt');
+
+      expect(result.stopReason).toBe('error');
+      expect(result.error).toBe('LLM response contained no choices');
+      expect(result.completed).toBe(false);
+      expect(result.turns).toHaveLength(0);
+      const errorEvent = (result.timeline.events ?? []).find((e) => e.type === 'error');
+      expect(errorEvent?.content).toBe('LLM response contained no choices');
+    });
   });
 
   describe('output assembly', () => {
@@ -292,6 +338,26 @@ describe('AgentProvider', () => {
       // Tier 2/3 assertions read context.prompt as the task; it must be the
       // real prompt (carried on the timeline start event), not an empty string.
       expect(ctx.prompt).toBe('refactor the auth module');
+    });
+
+    it('falls back to an empty prompt when the timeline has no start event', () => {
+      // agentContext recovers the task prompt from the run's `start` event. If a
+      // caller hands it a run whose timeline carries no start event (e.g. a
+      // synthesized/partial result), it must degrade to '' rather than throw —
+      // the downstream Tier 2/3 checks then simply have no task to compare to.
+      const run = {
+        output: 'x',
+        turns: [],
+        timeline: { events: [{ type: 'end' as const, timestamp: new Date().toISOString(), content: 'complete' }] },
+        totalTokens: { prompt: 0, completion: 0, total: 0 },
+        durationMs: 0,
+        completed: true,
+        stopReason: 'complete' as const,
+      };
+
+      const ctx = agentContext(run);
+      expect(ctx.prompt).toBe('');
+      expect(ctx.metadata.timeline).toBe(run.timeline);
     });
   });
 });

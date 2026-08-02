@@ -122,6 +122,70 @@ describe('labelField — static, content-blind provenance', () => {
   });
 });
 
+// ─── Exhaustive map contract: NO path may be added/relabeled unnoticed ──────────
+//
+// The tests above spot-check representative paths. This block pins the ENTIRE
+// fixed provenance map — every key with its exact label AND the total key count.
+// It is the tripwire for the §F HARD GUARDRAIL: if a future edit adds a new
+// field path, relabels an existing one (e.g. sneaks a model-authored field in as
+// PROOF), or drops one, this test fails loudly instead of letting the change
+// slip through the representative spot-checks. `output_data` is intentionally
+// absent (event-type dependent — resolved by labelField, asserted separately).
+describe('provenanceMap — exhaustive, pinned CLAIM/PROOF/NEUTRAL contract', () => {
+  // The COMPLETE expected map. Any diff here is a deliberate contract change and
+  // must be reviewed against the independence axis (proof = harness/code only).
+  const EXPECTED: Readonly<Record<string, Provenance>> = {
+    // PROOF — harness/runtime/code produced; the agent could not author these.
+    event_type: 'proof',
+    timestamp: 'proof',
+    duration_ms: 'proof',
+    tokens_in: 'proof',
+    tokens_out: 'proof',
+    'tool_call.tool_output': 'proof',
+    'tool_call.duration_ms': 'proof',
+    'tool_call.timestamp': 'proof',
+    'decision_trace.timestamp': 'proof',
+    // CLAIM — model-authored; the hypothesis under test, never evidence.
+    'tool_call.tool_name': 'claim',
+    'tool_call.tool_input': 'claim',
+    'decision_trace.reasoning': 'claim',
+    'decision_trace.alternatives_considered': 'claim',
+    'decision_trace.confidence': 'claim',
+    // NEUTRAL — identifiers/context; assert nothing about behaviour.
+    event_id: 'neutral',
+    session_id: 'neutral',
+    model: 'neutral',
+    input_data: 'neutral',
+    'tool_call.tool_call_id': 'neutral',
+    'decision_trace.trace_id': 'neutral',
+    'decision_trace.step': 'neutral',
+  };
+
+  it('matches the full expected map exactly (no missing/extra/relabeled paths)', () => {
+    expect(provenanceMap()).toEqual(EXPECTED);
+  });
+
+  it('has no CLAIM path that any event type could promote to PROOF', () => {
+    // A model-authored field must stay CLAIM under EVERY event type — there is
+    // no event kind under which the agent's own narration becomes evidence.
+    const claimPaths = Object.entries(EXPECTED)
+      .filter(([, label]) => label === 'claim')
+      .map(([path]) => path);
+    for (const et of ['llm_call', 'tool_call', 'tool_result', 'decision', 'error', 'generic']) {
+      for (const path of claimPaths) {
+        expect(labelField(et, path), `${path} must stay CLAIM on ${et}`).toBe('claim');
+      }
+    }
+  });
+
+  it('pins decision_trace.timestamp as PROOF (harness clock, not a claim)', () => {
+    // Guards the one decision_trace.* field that is PROOF — the rest are CLAIM,
+    // so it is the easiest to accidentally flip when editing that group.
+    expect(labelField('decision', 'decision_trace.timestamp')).toBe('proof');
+    expect(labelField('tool_call', 'decision_trace.timestamp')).toBe('proof');
+  });
+});
+
 // ─── ingestTrace: read-only normalization ───────────────────────────────────────
 
 describe('ingestTrace — read-only normalization into labeled records', () => {

@@ -135,6 +135,8 @@ describe('detection seam: timestamp utilities', () => {
     expect(formatDurationSeam(3_600_000)).toBe('1.0h');
     expect(formatDurationSeam(NaN)).toBe('unknown');
     expect(formatDurationSeam(-5)).toBe('unknown');
+    expect(formatDurationSeam(Infinity)).toBe('unknown');
+    expect(formatDurationSeam(-Infinity)).toBe('unknown');
   });
 });
 

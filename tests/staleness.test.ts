@@ -64,6 +64,11 @@ describe('formatDuration', () => {
   it('returns unknown for negative', () => {
     expect(formatDuration(-1000)).toBe('unknown');
   });
+
+  it('returns unknown for non-finite (Infinity/-Infinity)', () => {
+    expect(formatDuration(Infinity)).toBe('unknown');
+    expect(formatDuration(-Infinity)).toBe('unknown');
+  });
 });
 
 // ─── detectTimeout ──────────────────────────────────────────────────────────────

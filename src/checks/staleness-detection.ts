@@ -52,7 +52,11 @@ export function parseTimestamp(ts: string | number): number {
  * Format a duration in ms to a human-readable string.
  */
 export function formatDuration(ms: number): string {
-  if (Number.isNaN(ms) || ms < 0) return 'unknown';
+  // Guard non-finite (NaN/±Infinity) and negative deltas. Durations are derived
+  // from `end - start` timestamp math, so a malformed/absent timestamp can
+  // legitimately yield NaN or ±Infinity; without this guard those fall through
+  // to the hours branch and render as e.g. "Infinityh".
+  if (!Number.isFinite(ms) || ms < 0) return 'unknown';
   if (ms < 1000) return `${Math.round(ms)}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
   if (ms < 3_600_000) return `${(ms / 60_000).toFixed(1)}m`;

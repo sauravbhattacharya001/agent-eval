@@ -15,7 +15,63 @@
  * never deep module paths, so it mirrors exactly what an installed consumer sees.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import * as api from '../src/index.js';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const repoRoot = join(here, '..');
+
+/**
+ * Names the root barrel (`src/index.ts`) exports, parsed from source text so
+ * that type-only exports (e.g. `EvalProvider`) count too — they are erased at
+ * runtime and would be invisible to `import * as api`.
+ */
+function parseBarrelExports(): Set<string> {
+  const src = readFileSync(join(repoRoot, 'src', 'index.ts'), 'utf8');
+  const names = new Set<string>();
+  // Strip `//` line comments so inline notes inside a multi-line `export { ... }`
+  // block never contaminate the parsed names.
+  const stripComments = (s: string): string => s.replace(/\/\/[^\n]*/g, '');
+  // `export { a, b as c, type D } from '...'` and multi-line variants.
+  for (const m of src.matchAll(/export\s+(?:type\s+)?\{([^}]*)\}/g)) {
+    for (const raw of stripComments(m[1]).split(',')) {
+      const cleaned = raw.replace(/\btype\b/g, '').trim();
+      if (!cleaned) continue;
+      const alias = cleaned.split(/\s+as\s+/).pop();
+      if (alias) names.add(alias.trim());
+    }
+  }
+  // `export function foo` / `export const bar` / `export class Baz` ...
+  for (const m of src.matchAll(
+    /export\s+(?:async\s+)?(?:function|class|const|let|var|type|interface|enum)\s+(\w+)/g,
+  )) {
+    names.add(m[1]);
+  }
+  return names;
+}
+
+/**
+ * Every symbol imported `from 'agent-eval'` in a README code block. This is the
+ * exact contract a copy-pasting reader depends on: if the docs import a name the
+ * barrel no longer exports, that snippet is broken.
+ */
+function parseReadmeAgentEvalImports(): string[] {
+  const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8');
+  const symbols = new Set<string>();
+  const importRe = /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*['"]agent-eval['"]/g;
+  for (const m of readme.matchAll(importRe)) {
+    for (const raw of m[1].split(',')) {
+      const cleaned = raw.replace(/\btype\b/g, '').trim();
+      if (!cleaned) continue;
+      // A README import always names the exported symbol (before any `as`).
+      const name = cleaned.split(/\s+as\s+/)[0].trim();
+      if (name) symbols.add(name);
+    }
+  }
+  return [...symbols];
+}
 
 /** Names that must be exported as callable functions, grouped by pillar. */
 const PILLAR_FUNCTIONS = {
@@ -163,5 +219,27 @@ describe('public API surface (src/index.ts)', () => {
       expect(runtimeValueCount).toBeGreaterThan(150);
       expect(runtimeValueCount).toBeLessThan(260);
     });
+  });
+
+  describe('README code snippets import only real exports (docs cannot rot)', () => {
+    const barrel = parseBarrelExports();
+    const readmeImports = parseReadmeAgentEvalImports();
+
+    it('finds agent-eval imports to check in the README', () => {
+      // Guards the guard: if the extractor silently matches nothing (README
+      // reformatted, fenced blocks changed), fail loudly instead of passing
+      // vacuously.
+      expect(readmeImports.length).toBeGreaterThan(10);
+    });
+
+    for (const name of parseReadmeAgentEvalImports()) {
+      it(`README imports \`${name}\` which the barrel exports`, () => {
+        expect(
+          barrel.has(name),
+          `README.md imports "${name}" from 'agent-eval', but src/index.ts does not export it. ` +
+            `Fix the docs or restore the export.`,
+        ).toBe(true);
+      });
+    }
   });
 });

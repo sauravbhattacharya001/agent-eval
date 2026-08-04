@@ -125,8 +125,9 @@ export function transcriptToTimeline(
   }
 
   if (Number.isFinite(endMs) && transcript.outcome !== 'unknown') {
+    // endMs is finite in this branch, so it is the end timestamp directly.
     events.push({
-      timestamp: new Date(Number.isFinite(endMs) ? endMs : startMs + (transcript.actionItems.length + 1) * 1000).toISOString(),
+      timestamp: new Date(endMs as number).toISOString(),
       type: 'end',
       content: transcript.outcome,
     });

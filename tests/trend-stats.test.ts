@@ -182,3 +182,110 @@ describe('extractMetric (direct)', () => {
     expect(extractMetric(row(), 'durationMs')).toBeUndefined();
   });
 });
+
+// --- extractMetric detail/sentinel branches -------------------------------
+
+describe('extractMetric (detail + sentinel edges)', () => {
+  function rowWith(detail: Record<string, number | string | boolean>): CheckScore {
+    return { ...row(), detail };
+  }
+
+  it('reads a real numeric detail metric straight through', () => {
+    expect(extractMetric(rowWith({ durationMs: 4200 }), 'durationMs')).toBe(4200);
+  });
+
+  it('treats the scorer -1 durationMs sentinel as unknown (undefined)', () => {
+    // -1 is the scorer's "durationMs not recorded" marker, not a real 0ms run.
+    expect(extractMetric(rowWith({ durationMs: -1 }), 'durationMs')).toBeUndefined();
+  });
+
+  it('skips a non-finite score rather than charting it', () => {
+    expect(extractMetric(row({ score: Number.NaN }), 'score')).toBeUndefined();
+  });
+
+  it('skips a detail metric whose value is a non-number', () => {
+    expect(extractMetric(rowWith({ errors: 'lots' as unknown as number }), 'errors')).toBeUndefined();
+  });
+});
+
+// --- classify / buildSummary branches reached only via buildTrend ----------
+
+describe('classify + buildSummary (direct seam edges)', () => {
+  it('stays stable when a score move clears z but is below the minDelta floor', () => {
+    // Tiny but perfectly consistent dip: z is large (zero-variance sides) yet the
+    // absolute score delta (0.02) is under DEFAULT_MIN_DELTA (0.05) -> stable.
+    const tinyDip = [point(1.0, 0), point(1.0, 1), point(0.98, 2), point(0.98, 3)];
+    const t = buildTrend('builder', 'completeness', 'score', tinyDip, DEFAULT_BUILD_OPTS);
+    expect(Math.abs(t.delta)).toBeCloseTo(0.02, 10);
+    expect(t.direction).toBe('stable');
+    expect(t.severity).toBe('none');
+    expect(t.summary).toContain('stable at ~');
+  });
+
+  it('classifies a real score rise as improving with an up arrow in the summary', () => {
+    const rising = [point(0.5, 0), point(0.5, 1), point(1.0, 2), point(1.0, 3)];
+    const t = buildTrend('builder', 'completeness', 'score', rising, DEFAULT_BUILD_OPTS);
+    expect(t.direction).toBe('improving');
+    expect(t.improved).toBe(true);
+    expect(t.severity).toBe('none');
+    expect(t.summary).toContain('improving');
+    expect(t.summary).toContain('up');
+  });
+
+  it('does NOT apply the minDelta floor to a raw (non-score) metric', () => {
+    // A 2ms consistent rise is well under any score minDelta, but for durationMs
+    // the z-test alone governs, so a zero-variance move still fires.
+    const raw = [point(100, 0), point(100, 1), point(102, 2), point(102, 3)];
+    const t = buildTrend('builder', 'completeness', 'durationMs', raw, DEFAULT_BUILD_OPTS);
+    expect(t.direction).toBe('degrading');
+  });
+
+  it('formats a sub-minute duration mean in seconds in the summary', () => {
+    const sec = [point(2000, 0), point(2000, 1), point(9000, 2), point(9000, 3)];
+    const t = buildTrend('builder', 'completeness', 'durationMs', sec, DEFAULT_BUILD_OPTS);
+    expect(t.summary).toMatch(/\ds->/); // baseline mean 2s -> ...
+    expect(t.summary).toContain('9s');
+  });
+
+  it('formats a multi-minute duration mean in minutes in the summary', () => {
+    const mins = [point(120_000, 0), point(120_000, 1), point(360_000, 2), point(360_000, 3)];
+    const t = buildTrend('builder', 'completeness', 'durationMs', mins, DEFAULT_BUILD_OPTS);
+    expect(t.summary).toContain('2.0m');
+    expect(t.summary).toContain('6.0m');
+  });
+});
+
+// --- segmentStats / splitSeries: remaining pure edges ----------------------
+
+describe('segmentStats / splitSeries (remaining pure edges)', () => {
+  it('returns an all-NaN empty segment for zero points', () => {
+    const s = segmentStats([]);
+    expect(s.count).toBe(0);
+    expect(Number.isNaN(s.mean)).toBe(true);
+    expect(Number.isNaN(s.stdev)).toBe(true);
+    expect(Number.isNaN(s.min)).toBe(true);
+    expect(Number.isNaN(s.max)).toBe(true);
+    expect(Number.isNaN(s.firstMs)).toBe(true);
+  });
+
+  it("splits an odd series in 'half' mode with the extra point in baseline", () => {
+    // n=5, floor(5/2)=2 recent -> baseline 3 / recent 2.
+    const pts = [point(1, 0), point(1, 1), point(1, 2), point(1, 3), point(1, 4)];
+    const { baseline, recent } = splitSeries(pts, 'half');
+    expect(baseline.length).toBe(3);
+    expect(recent.length).toBe(2);
+  });
+
+  it('keeps one point on each side of a 2-point series', () => {
+    const pts = [point(1, 0), point(0, 1)];
+    const { baseline, recent } = splitSeries(pts, 'half');
+    expect(baseline.length).toBe(1);
+    expect(recent.length).toBe(1);
+  });
+
+  it('returns two empty segments for an empty series', () => {
+    const { baseline, recent } = splitSeries([], 'half');
+    expect(baseline.length).toBe(0);
+    expect(recent.length).toBe(0);
+  });
+});

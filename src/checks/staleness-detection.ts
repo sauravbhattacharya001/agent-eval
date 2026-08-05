@@ -42,7 +42,13 @@ export { detectAbandonment } from './staleness-abandonment.js';
  */
 export function parseTimestamp(ts: string | number): number {
   if (typeof ts === 'number') {
-    return ts;
+    // Normalize non-finite numeric input (NaN/±Infinity) to NaN so this branch
+    // honours the documented contract ("Returns NaN for invalid timestamps")
+    // exactly like the string branch below. A raw ±Infinity would otherwise
+    // slip through every downstream `Number.isNaN(...)` guard (which is false
+    // for Infinity) and propagate into `end - start` duration math, producing
+    // Infinity/NaN durations and false-positive timeout errors.
+    return Number.isFinite(ts) ? ts : NaN;
   }
   const parsed = Date.parse(ts);
   return Number.isNaN(parsed) ? NaN : parsed;

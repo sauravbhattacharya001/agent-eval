@@ -128,6 +128,34 @@ describe('detection seam: timestamp utilities', () => {
     expect(Number.isNaN(parseTimestampSeam('not-a-date'))).toBe(true);
   });
 
+  it('parseTimestamp normalizes non-finite NUMERIC input to NaN (contract parity with the string branch)', () => {
+    // A raw ±Infinity/NaN number must become NaN so downstream `Number.isNaN`
+    // guards (which are FALSE for Infinity) reject it instead of letting it
+    // propagate into `end - start` duration math and fake a timeout.
+    expect(Number.isNaN(parseTimestampSeam(Number.NaN))).toBe(true);
+    expect(Number.isNaN(parseTimestampSeam(Number.POSITIVE_INFINITY))).toBe(true);
+    expect(Number.isNaN(parseTimestampSeam(Number.NEGATIVE_INFINITY))).toBe(true);
+    // Finite numbers (including 0 and negatives) still pass straight through.
+    expect(parseTimestampSeam(0)).toBe(0);
+    expect(parseTimestampSeam(-1700)).toBe(-1700);
+  });
+
+  it('detectTimeout does not fake a timeout when a numeric end timestamp is +Infinity', () => {
+    // Regression: an unguarded +Infinity endedAt used to slip past the
+    // Number.isNaN(endMs) guard, yielding durationMs = Infinity > timeout and
+    // a false-positive timeout error. Normalized to NaN, the detector now
+    // bails cleanly (returns null) instead.
+    const issue = detectTimeoutSeam(
+      {
+        startedAt: 0,
+        endedAt: Number.POSITIVE_INFINITY,
+        events: [],
+      },
+      { maxDurationMs: 1000 },
+    );
+    expect(issue).toBeNull();
+  });
+
   it('formatDuration renders human-readable buckets and guards bad input', () => {
     expect(formatDurationSeam(500)).toBe('500ms');
     expect(formatDurationSeam(1500)).toBe('1.5s');

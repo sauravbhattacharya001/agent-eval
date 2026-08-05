@@ -213,13 +213,23 @@ export function rollingWindow(days: number, today: Date = new Date()): {
   fromDate: string;
   toDate: string;
 } {
-  if (days <= 0) {
+  // Normalize `days` to a finite, non-negative integer before any date math.
+  // Callers pass this straight through from a CLI/config `window` value, so a
+  // non-finite (NaN/Infinity) or fractional input is realistic. Without this
+  // guard, `NaN`/`Infinity` flow into `setUTCDate(getUTCDate() - (days - 1))`,
+  // producing an Invalid Date whose `isoDate(...)` renders the garbage bound
+  // `NaN-NaN-NaN` - a silent corruption that then filters out (or in) the wrong
+  // transcripts. A fractional `days` (e.g. 2.5) would likewise shift the start
+  // bound by a partial day. Floor to a whole day; treat anything unusable as 0.
+  const safeDays = Number.isFinite(days) ? Math.max(0, Math.floor(days)) : 0;
+
+  if (safeDays <= 0) {
     const t = isoDate(today);
     return { fromDate: t, toDate: t };
   }
   const toDate = isoDate(today);
   const start = new Date(today.getTime());
-  start.setUTCDate(start.getUTCDate() - (days - 1));
+  start.setUTCDate(start.getUTCDate() - (safeDays - 1));
   return { fromDate: isoDate(start), toDate };
 }
 

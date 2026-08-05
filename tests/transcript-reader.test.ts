@@ -836,6 +836,33 @@ describe('rollingWindow', () => {
     const w = rollingWindow(0, today);
     expect(w.fromDate).toBe(w.toDate);
   });
+
+  it('clamps negative days to a single day (no garbage bound)', () => {
+    const today = new Date('2026-06-09T12:00:00Z');
+    const w = rollingWindow(-5, today);
+    expect(w.fromDate).toBe('2026-06-09');
+    expect(w.toDate).toBe('2026-06-09');
+  });
+
+  it('floors a fractional window to whole days', () => {
+    const today = new Date('2026-06-09T12:00:00Z');
+    // 7.9 must behave like 7 (start bound 6 days back), not shift by a
+    // partial day via setUTCDate(-6.9).
+    expect(rollingWindow(7.9, today)).toEqual(rollingWindow(7, today));
+    expect(rollingWindow(7, today).fromDate).toBe('2026-06-03');
+  });
+
+  it('normalizes non-finite windows to a single day instead of NaN bounds', () => {
+    const today = new Date('2026-06-09T12:00:00Z');
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      const w = rollingWindow(bad, today);
+      expect(w.fromDate).toBe('2026-06-09');
+      expect(w.toDate).toBe('2026-06-09');
+      // Never emit the corrupt 'NaN-NaN-NaN' bound that broke date filtering.
+      expect(w.fromDate).not.toContain('NaN');
+      expect(w.toDate).not.toContain('NaN');
+    }
+  });
 });
 
 describe('transcriptToTimeline: content-rich but timestamp-less runs', () => {

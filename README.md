@@ -484,6 +484,7 @@ Why it doesn't get snowed by a *polished-but-false* final message (a run that ti
 | `--max-cost-usd <n>` | `5` | Hard ceiling; aborts before exceeding |
 | `--max-input-tokens <n>` | `8000` | Per-session input cap |
 | `--delay-ms <n>` | `25000` | Pause between sessions (rate-limit pacing) |
+| `--max-retries <n>` | `5` | Retries on a 429, honoring `Retry-After` (backoff) |
 | `--dollars-per-mtok-in/-out` | `0.59` / `0.79` | Price for the cost projection |
 
 The API key is read from `JUDGE_API_KEY` (preferred), else `GROQ_API_KEY` / `OPENROUTER_API_KEY` / `OPENAI_API_KEY` by provider. Uses Node's built-in `node:sqlite` - no external deps.

@@ -314,7 +314,13 @@ async function runTriage(parsed: ParsedArgs): Promise<void> {
     return;
   }
   if (!parsed.format) {
-    console.error('Missing --format. One of: otlp | langsmith | agentlens');
+    if (parsed.invalidFormat !== undefined) {
+      console.error(
+        `Unknown --format "${parsed.invalidFormat}". One of: otlp | langsmith | agentlens`,
+      );
+    } else {
+      console.error('Missing --format. One of: otlp | langsmith | agentlens');
+    }
     process.exit(1);
     return;
   }

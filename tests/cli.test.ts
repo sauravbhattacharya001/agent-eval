@@ -125,9 +125,21 @@ describe('CLI Argument Parsing - triage command', () => {
     expect(parseCliArgs(['node', 'agent-eval', 'triage', 't', '--format', 'langsmith'])!.format).toBe('langsmith');
   });
 
-  it('ignores an unrecognized --format value (leaves format unset)', () => {
+  it('captures an unrecognized --format value as invalidFormat (format stays unset)', () => {
     const result = parseCliArgs(['node', 'agent-eval', 'triage', './traces', '--format', 'bogus']);
     expect(result!.format).toBeUndefined();
+    expect(result!.invalidFormat).toBe('bogus');
+  });
+
+  it('leaves invalidFormat unset for a recognized --format value', () => {
+    const result = parseCliArgs(['node', 'agent-eval', 'triage', 't', '--format', 'otlp']);
+    expect(result!.format).toBe('otlp');
+    expect(result!.invalidFormat).toBeUndefined();
+  });
+
+  it('leaves invalidFormat unset when no --format is supplied', () => {
+    const result = parseCliArgs(['node', 'agent-eval', 'triage', './traces']);
+    expect(result!.invalidFormat).toBeUndefined();
   });
 
   it('parses a positive --dollars-per-mtok value', () => {

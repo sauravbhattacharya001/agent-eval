@@ -16,6 +16,12 @@ export interface ParsedArgs {
   finished: boolean;
   /** triage: trace format (adapter to use). */
   format?: 'otlp' | 'langsmith' | 'agentlens';
+  /**
+   * triage: the raw `--format` value when it was supplied but NOT one of the
+   * recognized adapters. `format` stays unset in that case; this field lets the
+   * CLI tell "you passed an unknown format" apart from "you passed no --format".
+   */
+  invalidFormat?: string;
   /** triage: dollars per million tokens for the cost projection. */
   dollarsPerMillionTokens?: number;
 }
@@ -59,6 +65,7 @@ export function parseCliArgs(argv: string[]): ParsedArgs | null {
       if (arg === '--format') {
         const v = args[++i];
         if (v === 'otlp' || v === 'langsmith' || v === 'agentlens') parsed.format = v;
+        else if (v !== undefined) parsed.invalidFormat = v;
       } else if (arg === '--dollars-per-mtok') {
         const v = args[++i];
         if (v !== undefined) {

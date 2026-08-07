@@ -33,8 +33,8 @@ Options (run):
   --bail, -b                Stop on first failure
   --filter, -f <pattern>   Only run specs matching pattern (regex)
   --reporter, -r <name>    Reporter: terminal (default) or json
-  --timeout, -t <ms>       Default timeout per spec (default: 30000)
-  --concurrency, -c <n>    Max parallel specs (default: 1)
+  --timeout, -t <ms>       Default timeout per spec, positive integer (default: 30000)
+  --concurrency, -c <n>    Max parallel specs, positive integer (default: 1)
 
 Options (triage):
   --format <otlp|langsmith|agentlens>   Trace format (required)
@@ -81,6 +81,13 @@ async function main(): Promise<void> {
     console.error('Unknown command. Run "agent-eval --help" for usage.');
     process.exit(1);
     return;
+  }
+
+  // Surface any non-fatal parse diagnostics (malformed option values that were
+  // ignored, so the effective value silently fell back to a default). Written to
+  // stderr so machine-readable stdout (e.g. `triage --json`) stays clean.
+  for (const w of parsed.warnings) {
+    console.error(`Warning: ${w}`);
   }
 
   if (parsed.command === 'version') {

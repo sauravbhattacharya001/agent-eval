@@ -105,6 +105,45 @@ describe('CLI Argument Parsing', () => {
     const result = parseCliArgs(['node', 'agent-eval', 'run', './specs']);
     expect(result!.bail).toBe(false);
   });
+
+  it('defaults warnings to an empty array', () => {
+    const result = parseCliArgs(['node', 'agent-eval', 'run', './specs']);
+    expect(result!.warnings).toEqual([]);
+  });
+
+  it('warns and keeps the default when --reporter is unrecognized', () => {
+    const result = parseCliArgs(['node', 'agent-eval', 'run', './specs', '--reporter', 'xml']);
+    expect(result!.reporter).toBe('terminal');
+    expect(result!.warnings).toHaveLength(1);
+    expect(result!.warnings[0]).toContain('--reporter');
+    expect(result!.warnings[0]).toContain('xml');
+  });
+
+  it('warns and keeps the default when --timeout is non-numeric', () => {
+    const result = parseCliArgs(['node', 'agent-eval', 'run', './specs', '--timeout', 'abc']);
+    expect(result!.timeoutMs).toBe(30_000);
+    expect(result!.warnings[0]).toContain('--timeout');
+  });
+
+  it('warns and keeps the default when --timeout is non-positive', () => {
+    const result = parseCliArgs(['node', 'agent-eval', 'run', './specs', '--timeout', '0']);
+    expect(result!.timeoutMs).toBe(30_000);
+    expect(result!.warnings[0]).toContain('--timeout');
+  });
+
+  it('warns and keeps the default when --concurrency is non-numeric', () => {
+    const result = parseCliArgs(['node', 'agent-eval', 'run', './specs', '-c', 'lots']);
+    expect(result!.concurrency).toBe(1);
+    expect(result!.warnings[0]).toContain('--concurrency');
+  });
+
+  it('records no warnings when option values are valid', () => {
+    const result = parseCliArgs([
+      'node', 'agent-eval', 'run', './specs',
+      '--reporter', 'json', '--timeout', '5000', '-c', '4',
+    ]);
+    expect(result!.warnings).toEqual([]);
+  });
 });
 
 describe('CLI Argument Parsing - triage command', () => {
@@ -155,6 +194,12 @@ describe('CLI Argument Parsing - triage command', () => {
   it('ignores a non-positive --dollars-per-mtok value', () => {
     const result = parseCliArgs(['node', 'agent-eval', 'triage', './traces', '--dollars-per-mtok', '0']);
     expect(result!.dollarsPerMillionTokens).toBeUndefined();
+  });
+
+  it('warns when --dollars-per-mtok is malformed', () => {
+    const result = parseCliArgs(['node', 'agent-eval', 'triage', './traces', '--dollars-per-mtok', 'abc']);
+    expect(result!.dollarsPerMillionTokens).toBeUndefined();
+    expect(result!.warnings[0]).toContain('--dollars-per-mtok');
   });
 
   it('parses --json on triage', () => {

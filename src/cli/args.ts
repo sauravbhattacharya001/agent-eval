@@ -24,6 +24,13 @@ export interface ParsedArgs {
   invalidFormat?: string;
   /** triage: dollars per million tokens for the cost projection. */
   dollarsPerMillionTokens?: number;
+  /**
+   * Non-fatal diagnostics gathered while parsing: an option value that was
+   * malformed and therefore ignored (so the effective value silently fell back
+   * to its default). The CLI surfaces these to stderr so a typo like
+   * `--timeout abc` or `--reporter xml` doesn't vanish without a trace.
+   */
+  warnings: string[];
 }
 
 function baseArgs(command: ParsedArgs['command']): ParsedArgs {
@@ -36,6 +43,7 @@ function baseArgs(command: ParsedArgs['command']): ParsedArgs {
     concurrency: 1,
     json: false,
     finished: false,
+    warnings: [],
   };
 }
 
@@ -71,6 +79,7 @@ export function parseCliArgs(argv: string[]): ParsedArgs | null {
         if (v !== undefined) {
           const n = Number(v);
           if (!isNaN(n) && n > 0) parsed.dollarsPerMillionTokens = n;
+          else parsed.warnings.push(`ignored --dollars-per-mtok "${v}": expected a positive number (using default 9)`);
         }
       } else if (arg === '--json') {
         parsed.json = true;
@@ -102,32 +111,31 @@ export function parseCliArgs(argv: string[]): ParsedArgs | null {
     return null;
   }
 
-  const paths: string[] = [];
-  let bail = false;
-  let filter: string | undefined;
-  let reporter: 'terminal' | 'json' = 'terminal';
-  let timeoutMs = 30_000;
-  let concurrency = 1;
+  const parsed = baseArgs('run');
 
   for (let i = 1; i < args.length; i++) {
     const arg = args[i];
     if (arg === undefined) continue;
     if (arg === '--bail' || arg === '-b') {
-      bail = true;
+      parsed.bail = true;
     } else if (arg === '--filter' || arg === '-f') {
       const next = args[++i];
-      if (next !== undefined) filter = next;
+      if (next !== undefined) parsed.filter = next;
     } else if (arg === '--reporter' || arg === '-r') {
       const value = args[++i];
       if (value === 'terminal' || value === 'json') {
-        reporter = value;
+        parsed.reporter = value;
+      } else if (value !== undefined) {
+        parsed.warnings.push(`ignored --reporter "${value}": expected terminal | json (using terminal)`);
       }
     } else if (arg === '--timeout' || arg === '-t') {
       const next = args[++i];
       if (next !== undefined) {
         const value = parseInt(next, 10);
         if (!isNaN(value) && value > 0) {
-          timeoutMs = value;
+          parsed.timeoutMs = value;
+        } else {
+          parsed.warnings.push(`ignored --timeout "${next}": expected a positive integer ms (using ${parsed.timeoutMs})`);
         }
       }
     } else if (arg === '--concurrency' || arg === '-c') {
@@ -135,13 +143,15 @@ export function parseCliArgs(argv: string[]): ParsedArgs | null {
       if (next !== undefined) {
         const value = parseInt(next, 10);
         if (!isNaN(value) && value > 0) {
-          concurrency = value;
+          parsed.concurrency = value;
+        } else {
+          parsed.warnings.push(`ignored --concurrency "${next}": expected a positive integer (using ${parsed.concurrency})`);
         }
       }
     } else if (!arg.startsWith('-')) {
-      paths.push(arg);
+      parsed.paths.push(arg);
     }
   }
 
-  return { command: 'run', paths, bail, filter, reporter, timeoutMs, concurrency, json: false, finished: false };
+  return parsed;
 }

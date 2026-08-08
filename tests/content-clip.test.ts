@@ -137,3 +137,49 @@ describe('clip — truncation boundary', () => {
     expect(out.endsWith('…')).toBe(true);
   });
 });
+
+describe('clip — never throws on non-serialisable values (no-throw contract)', () => {
+  // These payloads all break a naive `JSON.stringify(value).length`: circular
+  // refs and BigInt throw, functions and symbols stringify to `undefined`.
+  // `clip` must coerce each to a printable string via the String() fallback so a
+  // hostile structured event payload can never crash a timeline build.
+  it('does not throw on a circular reference and returns a non-empty string', () => {
+    const o: Record<string, unknown> = { a: 1 };
+    o.self = o;
+    let out = '';
+    expect(() => {
+      out = clip(o);
+    }).not.toThrow();
+    expect(typeof out).toBe('string');
+    expect(out.length).toBeGreaterThan(0);
+  });
+
+  it('does not throw on a BigInt', () => {
+    let out = '';
+    expect(() => {
+      out = clip(10n);
+    }).not.toThrow();
+    expect(out).toBe('10');
+  });
+
+  it('does not throw on a function (JSON.stringify → undefined)', () => {
+    expect(() => clip(() => {})).not.toThrow();
+    expect(typeof clip(() => {})).toBe('string');
+  });
+
+  it('does not throw on a symbol (JSON.stringify → undefined)', () => {
+    let out = '';
+    expect(() => {
+      out = clip(Symbol('x'));
+    }).not.toThrow();
+    expect(out).toContain('Symbol');
+  });
+
+  it('still truncates a String()-fallback result that exceeds max', () => {
+    const o: Record<string, unknown> = { blob: 'z'.repeat(50) };
+    o.self = o; // forces the String() fallback ('[object Object]')
+    const out = clip(o, 5);
+    expect(out.length).toBe(6); // 5 chars + ellipsis
+    expect(out.endsWith('…')).toBe(true);
+  });
+});

@@ -31,11 +31,34 @@ export const LABEL_TRUNCATION = 120;
  * When the result exceeds `max` characters it is hard-truncated and an ellipsis
  * (`…`) is appended.
  *
+ * Robustness: this helper is on every adapter's timeline-build hot path and must
+ * honour its "no throw" contract even for hostile payloads. `JSON.stringify`
+ * throws on a circular reference or a `BigInt`, and returns `undefined` (not a
+ * string) for a function or symbol — either of which would otherwise crash the
+ * whole timeline on `.length`. Both cases fall back to `String(value)`, so the
+ * value is always coerced to a printable, length-bounded string.
+ *
  * @param value  the raw content to clip (string or arbitrary structured value)
  * @param max    max characters to retain before truncating (default {@link CONTENT_TRUNCATION})
  */
 export function clip(value: unknown, max = CONTENT_TRUNCATION): string {
   if (value == null) return '';
-  const s = typeof value === 'string' ? value : JSON.stringify(value);
+  const s = typeof value === 'string' ? value : stringifySafe(value);
   return s.length > max ? s.slice(0, max) + '…' : s;
+}
+
+/**
+ * `JSON.stringify` a non-string value, guaranteeing a string result.
+ *
+ * Returns `String(value)` when `JSON.stringify` throws (circular reference,
+ * `BigInt`) or yields a non-string (`undefined` for a function/symbol), so
+ * {@link clip} never propagates an error or reaches `.length` on `undefined`.
+ */
+function stringifySafe(value: unknown): string {
+  try {
+    const s = JSON.stringify(value);
+    return typeof s === 'string' ? s : String(value);
+  } catch {
+    return String(value);
+  }
 }

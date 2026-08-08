@@ -97,8 +97,8 @@ export function readAllScores(root: string, workers?: readonly string[]): CheckS
 
 /**
  * Parse raw JSONL text into {@link CheckScore} rows, skipping blank and
- * malformed lines. Exposed for callers that already have the text in hand
- * (e.g. tests, streamed input).
+ * malformed lines (bad JSON, wrong shape, or a non-finite `score`). Exposed
+ * for callers that already have the text in hand (e.g. tests, streamed input).
  */
 export function parseScoresJsonl(text: string): CheckScore[] {
   const out: CheckScore[] = [];
@@ -300,7 +300,12 @@ function isCheckScore(obj: unknown): obj is CheckScore {
     typeof o.worker === 'string' &&
     typeof o.runId === 'string' &&
     typeof o.check === 'string' &&
+    // A non-finite score (Infinity/-Infinity from a JSONL literal like `1e999`,
+    // or a NaN sentinel) is treated as malformed and dropped: it would poison
+    // every downstream mean/z-score/rollup, breaking this store's core promise
+    // that one bad row can't corrupt the whole history.
     typeof o.score === 'number' &&
+    Number.isFinite(o.score) &&
     typeof o.status === 'string'
   );
 }

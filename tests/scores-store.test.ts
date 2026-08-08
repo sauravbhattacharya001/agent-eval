@@ -123,6 +123,21 @@ describe('scores-store', () => {
       expect(parseScoresJsonl(`${bad}\n${JSON.stringify(row())}`)).toHaveLength(1);
     });
 
+    it('drops rows whose score is non-finite (Infinity from a JSONL literal)', () => {
+      // `JSON.stringify(1e999)` collapses to `null`, so a real `Infinity`
+      // score can only reach the store as a raw JSONL literal. Number.isFinite
+      // in the guard must reject it so it never poisons downstream stats.
+      const raw = [
+        '{"worker":"x","runId":"r","check":"c","score":1e999,"status":"pass"}', // +Infinity
+        '{"worker":"x","runId":"r","check":"c","score":-1e999,"status":"pass"}', // -Infinity
+        JSON.stringify(row()),
+      ].join('\n');
+      const parsed = parseScoresJsonl(raw);
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0]?.score).toBe(1);
+      expect(parsed.every((r) => Number.isFinite(r.score))).toBe(true);
+    });
+
     it('handles CRLF line endings', () => {
       const text = `${JSON.stringify(row())}\r\n${JSON.stringify(row({ check: 'drift' }))}\r\n`;
       expect(parseScoresJsonl(text)).toHaveLength(2);

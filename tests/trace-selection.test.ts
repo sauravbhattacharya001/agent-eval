@@ -86,6 +86,14 @@ describe('parseSelectionKey', () => {
       harness: 'only-harness',
     });
   });
+
+  it('treats a trailing @ (empty harness) as an unknown harness', () => {
+    // `model@` encodes a model but no harness — the empty tail falls back to
+    // `<unknown>` (mirror of the leading-@ case), so the run still ranks on the
+    // model axis. Guards the `raw.slice(at + 1).trim() || '<unknown>'` branch.
+    expect(parseSelectionKey('gpt-4o@')).toEqual({ model: 'gpt-4o', harness: '<unknown>' });
+    expect(parseSelectionKey('@')).toEqual({ model: '<unknown>', harness: '<unknown>' });
+  });
 });
 
 describe('rankSelection — axis resolution', () => {
@@ -127,6 +135,18 @@ describe('rankSelection — axis resolution', () => {
         { fixed: 'harness' },
       ),
     ).toThrow(/hold the harness fixed/i);
+  });
+
+  it('rejects an explicit fixed=model when the model axis is not uniform', () => {
+    // Mirror of the fixed=harness guard: two models, one harness — forcing
+    // fixed=model is invalid, and the error must name the offending models so
+    // the caller can split the cohort. (Guards the symmetric validation branch.)
+    expect(() =>
+      rankSelection(
+        [run({ model: 'm1', harness: 'h' }), run({ model: 'm2', harness: 'h' })],
+        { fixed: 'model' },
+      ),
+    ).toThrow(/hold the model fixed.*m1.*m2/is);
   });
 
   it('ranks an empty cohort as an empty scorecard with a null winner', () => {

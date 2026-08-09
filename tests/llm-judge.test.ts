@@ -262,4 +262,63 @@ describe('LLMJudgeBackend — transport errors', () => {
     await expect(judge.evaluate('out', RUBRIC, CONTEXT)).rejects.toThrow(/parsing failed/);
     expect(calls).toHaveLength(2);
   });
+
+  it('falls back to "unknown" when the error body cannot be read', async () => {
+    // Exercises the `response.text().catch(() => 'unknown')` branch: a non-OK
+    // response whose body read itself rejects must still surface a clean message
+    // (status + "unknown") rather than leaking the text() rejection.
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 500,
+      text: async () => {
+        throw new Error('stream closed');
+      },
+    })) as unknown as typeof fetch;
+    const judge = new LLMJudgeBackend({ type: 'groq', apiKey: 'k' });
+    await expect(judge.evaluate('out', RUBRIC, CONTEXT)).rejects.toThrow(
+      /Judge LLM API error 500: unknown/,
+    );
+  });
+});
+
+// ─── TIMEOUT / ABORT ─────────────────────────────────────────────────────────
+
+describe('LLMJudgeBackend — request timeout', () => {
+  it('aborts the request via AbortSignal after timeoutMs and surfaces the abort', async () => {
+    vi.useFakeTimers();
+    try {
+      // fetch that rejects when the abort signal fires, mirroring the real
+      // fetch/AbortController contract, so we can assert the timeout path wires
+      // the signal through and clears its timer.
+      globalThis.fetch = vi.fn((_url: string, init: RequestInit) => {
+        const signal = init.signal as AbortSignal;
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () => {
+            const err = new Error('The operation was aborted');
+            err.name = 'AbortError';
+            reject(err);
+          });
+        });
+      }) as unknown as typeof fetch;
+
+      const judge = new LLMJudgeBackend({ type: 'groq', apiKey: 'k', timeoutMs: 1000 });
+      const p = judge.evaluate('out', RUBRIC, CONTEXT);
+      // Attach a rejection handler before advancing timers so the rejection is
+      // observed (avoids an unhandled-rejection warning under fake timers).
+      const assertion = expect(p).rejects.toThrow(/aborted/i);
+      await vi.advanceTimersByTimeAsync(1000);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not abort when the response resolves before timeoutMs', async () => {
+    // A fast success must clear the abort timer and return normally; regression
+    // guard that the finally-clearTimeout keeps a stray abort from firing.
+    mockFetchSequence([validJudgeJson()]);
+    const judge = new LLMJudgeBackend({ type: 'groq', apiKey: 'k', timeoutMs: 60000 });
+    const result = await judge.evaluate('out', RUBRIC, CONTEXT);
+    expect((result as RawJudgeResponse).scores[0]!.criterionId).toBe('clarity');
+  });
 });

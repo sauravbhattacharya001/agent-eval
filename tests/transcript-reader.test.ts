@@ -863,6 +863,20 @@ describe('rollingWindow', () => {
       expect(w.toDate).not.toContain('NaN');
     }
   });
+
+  it('falls back to a well-formed window when `today` is an Invalid Date', () => {
+    // A caller passing `new Date('garbage')` (bad config/CLI value) has a NaN
+    // epoch; without guarding the `today` axis, isoDate renders the corrupt
+    // bound '0NaN-NaN-NaN' which then mis-filters transcripts by string compare.
+    for (const days of [1, 7, 0, Number.NaN]) {
+      const w = rollingWindow(days, new Date('garbage'));
+      expect(w.fromDate).not.toContain('NaN');
+      expect(w.toDate).not.toContain('NaN');
+      expect(w.fromDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(w.toDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(w.fromDate <= w.toDate).toBe(true);
+    }
+  });
 });
 
 describe('transcriptToTimeline: content-rich but timestamp-less runs', () => {

@@ -223,12 +223,20 @@ export function rollingWindow(days: number, today: Date = new Date()): {
   // bound by a partial day. Floor to a whole day; treat anything unusable as 0.
   const safeDays = Number.isFinite(days) ? Math.max(0, Math.floor(days)) : 0;
 
+  // Guard the `today` axis the same way we guard `days`. An Invalid Date
+  // (e.g. a caller passing `new Date('garbage')` or a bad config value) has a
+  // NaN epoch, so `getUTCFullYear()` etc. are NaN and `isoDate` would render
+  // the corrupt bound `0NaN-NaN-NaN` - the identical silent-corruption failure
+  // the `safeDays` guard prevents, just on the other input. Fall back to the
+  // real current time so date filtering stays well-formed.
+  const safeToday = Number.isFinite(today.getTime()) ? today : new Date();
+
   if (safeDays <= 0) {
-    const t = isoDate(today);
+    const t = isoDate(safeToday);
     return { fromDate: t, toDate: t };
   }
-  const toDate = isoDate(today);
-  const start = new Date(today.getTime());
+  const toDate = isoDate(safeToday);
+  const start = new Date(safeToday.getTime());
   start.setUTCDate(start.getUTCDate() - (safeDays - 1));
   return { fromDate: isoDate(start), toDate };
 }

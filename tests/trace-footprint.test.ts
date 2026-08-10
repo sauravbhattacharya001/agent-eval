@@ -301,6 +301,22 @@ describe('footprint threshold flags and predicates', () => {
     expect(toRecoverFromErrors(fp)).toBe(true);
   });
 
+  it('treats a non-finite threshold as "no bound" (never a silent false alarm)', () => {
+    // A NaN/Infinity threshold (mis-computed budget/ceiling) must NOT flip a
+    // clean run to a failing verdict via `x <= NaN` (always false). Each
+    // threshold-taking predicate treats a non-finite bound as unbounded ⇒ pass.
+    const fp = analyzeFootprint(loadSession('build-retry-recover'));
+    for (const bad of [Number.NaN, Infinity, -Infinity]) {
+      expect(toCompleteWithinSteps(fp, bad)).toBe(true);
+      expect(toHaveToolErrorRateBelow(fp, bad)).toBe(true);
+      expect(toNotThrash(fp, bad)).toBe(true);
+    }
+    // Finite bounds are unaffected (regression guard on the happy path).
+    expect(toCompleteWithinSteps(fp, 4)).toBe(false);
+    expect(toHaveToolErrorRateBelow(fp, 0.39)).toBe(false);
+    expect(toNotThrash(fp, 1)).toBe(false);
+  });
+
   it('toRecoverFromErrors is false when an error never recovers', () => {
     const session: TraceSession = {
       events: [

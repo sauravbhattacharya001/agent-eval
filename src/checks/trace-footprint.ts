@@ -167,18 +167,41 @@ function buildSummary(parts: {
 // text and don't fit a trace). They give the selection layer (slice 4) and any
 // CI gate a stable, mechanical yes/no over PROOF.
 
-/** `true` iff the run used at most `maxToolCalls` tool calls (step budget). */
+/**
+ * `true` iff the run used at most `maxToolCalls` tool calls (step budget).
+ *
+ * A non-finite `maxToolCalls` (`NaN`/`±Infinity`, e.g. a mis-computed budget)
+ * would make the raw `<=` silently return `false` for `NaN` — flagging a clean
+ * run as over-budget — or accept everything for `+Infinity`. We treat a
+ * non-finite bound as "no step budget" (unbounded → pass), never as a silent
+ * fail, so a broken threshold can't manufacture a false gate failure.
+ */
 export function toCompleteWithinSteps(result: FootprintResult, maxToolCalls: number): boolean {
+  if (!Number.isFinite(maxToolCalls)) return true; // no/invalid budget ⇒ unbounded
   return result.toolCalls <= maxToolCalls;
 }
 
-/** `true` iff the tool-error rate is at most `maxRate` (0–1). */
+/**
+ * `true` iff the tool-error rate is at most `maxRate` (0–1).
+ *
+ * A non-finite `maxRate` (`NaN`/`±Infinity`) is not a usable bound: `rate <= NaN`
+ * is always `false`, so a `NaN` threshold would fail every run — a false alarm.
+ * Treat a non-finite bound as "no error-rate ceiling" (unbounded → pass) rather
+ * than letting a broken threshold silently condemn a clean run.
+ */
 export function toHaveToolErrorRateBelow(result: FootprintResult, maxRate: number): boolean {
+  if (!Number.isFinite(maxRate)) return true; // no/invalid ceiling ⇒ unbounded
   return result.toolErrorRate <= maxRate;
 }
 
-/** `true` iff the longest same-tool retry-after-error streak is at most `maxStreak`. */
+/**
+ * `true` iff the longest same-tool retry-after-error streak is at most
+ * `maxStreak`. A non-finite `maxStreak` is treated as "no thrash ceiling"
+ * (unbounded → pass) for the same reason: `streak <= NaN` is always `false`,
+ * which would report thrashing on a run that never retried.
+ */
 export function toNotThrash(result: FootprintResult, maxStreak = 2): boolean {
+  if (!Number.isFinite(maxStreak)) return true; // no/invalid ceiling ⇒ unbounded
   return result.longestRetryStreak <= maxStreak;
 }
 

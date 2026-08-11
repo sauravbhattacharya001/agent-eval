@@ -319,6 +319,10 @@ describe('scorecard-stats: buildWorkerScorecard', () => {
     // Only r1 is evaluable, and it passed -> 100%, not 50%.
     expect(line.passRate).toBe(1);
     expect(line.runs).toBe(2);
+    // The summary fraction is measured over EVALUABLE runs, so it must agree with
+    // the "100%" — not read a contradictory "100% pass (1/2)".
+    expect(line.summary).toContain('100% pass (1/1)');
+    expect(line.summary).not.toContain('(1/2)');
   });
 
   it('mixes pass + fail into pass rate, failure tally, and top-failure summary', () => {

@@ -235,10 +235,14 @@ export function buildWorkerScorecard(
 
   const passPctStr = Number.isFinite(passRate) ? `${Math.round(passRate * 100)}%` : 'n/a';
   const worstCat = cats[0] ? `, top failure: ${cats[0].check} (${cats[0].count})` : '';
+  // The fraction is measured over EVALUABLE runs (those with a pass/fail
+  // signal), matching passRate/passPctStr. Using total `runs` here would make
+  // the parenthetical contradict the percentage whenever some runs are all-skip
+  // (e.g. "100% pass (1/2)" when the second run carried no verdict).
   const summary =
     runs === 0
       ? `${worker}: no runs in window`
-      : `${worker}: ${grade}, ${passPctStr} pass (${passingRuns}/${runs}) ${trend.arrow}${worstCat}`;
+      : `${worker}: ${grade}, ${passPctStr} pass (${passingRuns}/${evaluable.length}) ${trend.arrow}${worstCat}`;
 
   return {
     worker,

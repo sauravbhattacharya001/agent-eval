@@ -24,6 +24,19 @@ import {
 
 // ─── DISPLAY HELPERS (private) ─────────────────────────────────────────────────────
 
+/**
+ * Escape arbitrary text for safe interpolation into a Markdown table cell.
+ *
+ * Worker names and check ids flow in from transcript filenames and check
+ * registrations, so a stray `|` would terminate the column early and an
+ * embedded newline would split the row — silently corrupting the table
+ * structure. This escapes `\` and `|` and folds CR/LF to a space, preserving
+ * all characters (well-behaved content is returned unchanged).
+ */
+function mdCell(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
+}
+
 function pctStr(n: number): string {
   return Number.isFinite(n) ? `${Math.round(n * 100)}%` : 'n/a';
 }
@@ -163,13 +176,13 @@ export function formatScorecardMarkdown(
         ? '—'
         : w.failureCategories
             .slice(0, maxFailures)
-            .map((f) => `${f.check} (${f.count})`)
+            .map((f) => `${mdCell(f.check)} (${f.count})`)
             .join(', ') +
           (w.failureCategories.length > maxFailures
             ? `, +${w.failureCategories.length - maxFailures} more`
             : '');
     out.push(
-      `| ${w.worker} | ${GRADE_LABEL[w.grade]} | ${pctStr(w.passRate)} | ` +
+      `| ${mdCell(w.worker)} | ${GRADE_LABEL[w.grade]} | ${pctStr(w.passRate)} | ` +
         `${scoreStr(w.meanScore)} | ${scoreStr(w.worstScore)} | ${w.runs} | ` +
         `${w.trend.arrow} | ${fails} |`,
     );
@@ -187,7 +200,7 @@ export function formatScorecardMarkdown(
       out.push('|---|---:|---:|---:|---:|---:|');
       for (const c of w.checks) {
         out.push(
-          `| ${c.check} | ${scoreStr(c.meanScore)} | ${c.passes} | ` +
+          `| ${mdCell(c.check)} | ${scoreStr(c.meanScore)} | ${c.passes} | ` +
             `${c.warns} | ${c.fails} | ${c.runs} |`,
         );
       }

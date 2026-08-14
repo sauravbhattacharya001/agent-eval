@@ -698,6 +698,86 @@ describe('buildScorecard (disk runner)', () => {
       rmSync(empty, { recursive: true, force: true });
     }
   });
+
+  it('drops excluded workers from both the score and the scorecard', () => {
+    // The whole tree has sentinel + gardener; excluding gardener must leave
+    // only sentinel scored and graded — the exclusion is forwarded to the
+    // scoring pass, not applied after the fact.
+    const res = buildScorecard(root, { now: FIXED_NOW, excludeWorkers: ['gardener'] });
+    expect(res.scorecard.workers.map((w) => w.worker)).toEqual(['sentinel']);
+    // Only sentinel's four good runs remain.
+    expect(res.scored).toBe(4);
+    expect(res.failed).toBe(0);
+  });
+
+  it('honours explicit fromDate/toDate over the trailing window', () => {
+    // An explicit two-day range keeps only 2026-06-04 and 2026-06-05, even
+    // though `window` would otherwise resolve a different span.
+    const res = buildScorecard(root, {
+      now: FIXED_NOW,
+      window: 7,
+      fromDate: '2026-06-04',
+      toDate: '2026-06-05',
+    });
+    // window is ignored once explicit dates are given; the resolved window is
+    // the explicit range verbatim.
+    expect(res.window).toEqual({ fromDate: '2026-06-04', toDate: '2026-06-05' });
+    // 2 days x 2 workers x 1 run/day = 4 transcripts.
+    expect(res.scored).toBe(4);
+    expect(res.scorecard.window).toEqual({ fromDate: '2026-06-04', toDate: '2026-06-05' });
+  });
+
+  it('reports a null window when neither dates nor a window are given', () => {
+    const res = buildScorecard(root, { now: FIXED_NOW });
+    expect(res.window).toBeUndefined();
+    // An all-time scorecard carries no window either.
+    expect(res.scorecard.window).toBeUndefined();
+  });
+
+  it('surfaces per-file parse/score failures in failed + errors', () => {
+    // Force an IO error inside the score pass by planting a directory whose
+    // name ends in `.md` — reading it as a file throws EISDIR, which the
+    // score-runner catches per file and reports rather than aborting the run.
+    const broken = mkdtempSync(join(tmpdir(), 'agent-eval-scorecard-eisdir-'));
+    try {
+      mkdirSync(join(broken, 'sentinel'), { recursive: true });
+      // One healthy real transcript…
+      writeFileSync(
+        join(broken, 'sentinel', '2026-06-08-1815.md'),
+        goodTranscript('2026-06-08 18:15'),
+        'utf8',
+      );
+      // …and one path that looks like a transcript but is a directory.
+      mkdirSync(join(broken, 'sentinel', '2026-06-09-1815.md'), { recursive: true });
+
+      const res = buildScorecard(broken, { now: FIXED_NOW });
+      expect(res.scored).toBe(1);
+      expect(res.failed).toBe(1);
+      expect(res.errors).toHaveLength(1);
+      expect(res.errors[0]!.path).toContain('2026-06-09-1815.md');
+      expect(res.errors[0]!.error).toBeTruthy();
+      // The one good run still grades normally despite its broken sibling.
+      expect(res.scorecard.workers.map((w) => w.worker)).toEqual(['sentinel']);
+    } finally {
+      rmSync(broken, { recursive: true, force: true });
+    }
+  });
+
+  it('forwards trendMetrics to the trend pass without changing the snapshot', () => {
+    // Passing an explicit metric set exercises the trendMetrics branch; the
+    // pass rates (the snapshot) are unaffected by which metrics draw arrows.
+    const base = buildScorecard(root, { now: FIXED_NOW });
+    const withMetrics = buildScorecard(root, {
+      now: FIXED_NOW,
+      trendMetrics: ['score', 'durationMs'],
+    });
+    expect(withMetrics.scored).toBe(base.scored);
+    expect(withMetrics.trendRowsRead).toBeGreaterThan(0);
+    // Every worker still gets a real arrow (trends were not suppressed).
+    for (const w of withMetrics.scorecard.workers) {
+      expect(['↑', '↓', '→']).toContain(w.trend.arrow);
+    }
+  });
 });
 
 // ─── Public API smoke (package root re-exports) ────────────────────────────

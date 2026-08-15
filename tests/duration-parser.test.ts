@@ -110,6 +110,36 @@ describe('parseDuration (direct module)', () => {
       const d = parseDuration('10:00 → 10:00 (~30 minutes actual)');
       expect(d.ms).toBe(30 * 60_000);
     });
+
+    it('falls all the way to the bare-number path for a zero-length range with no tokens', () => {
+      // 10:00 → 10:00 has diff 0 (range branch requires diff > 0) AND carries no
+      // h/m/s tokens, so BOTH the range and token branches are skipped. The only
+      // remaining signal is the bare-number fallback, which grabs the FIRST digit
+      // run ("10") and assumes minutes - inexact, never 0ms.
+      const d = parseDuration('10:00 → 10:00 PT');
+      expect(d.ms).toBe(10 * 60_000);
+      expect(d.exact).toBe(false);
+    });
+  });
+
+  describe('zero-valued tokens', () => {
+    it('does not treat a lone "0 minutes" as an exact token total', () => {
+      // A "0 minutes" token sets matchedAny=true but totalMs=0, which fails the
+      // `totalMs > 0` guard on the token branch. So it does NOT take the exact
+      // token path; it falls through to the bare-number fallback, which reads the
+      // leading "0" as minutes: 0ms, but flagged inexact (not exact).
+      const d = parseDuration('0 minutes');
+      expect(d.ms).toBe(0);
+      expect(d.exact).toBe(false);
+    });
+
+    it('treats an all-zero token breakdown ("0h 0m") as inexact zero', () => {
+      // Every token is zero, so totalMs stays 0 and the exact token branch is
+      // skipped; the bare-number fallback returns 0ms, inexact.
+      const d = parseDuration('0h 0m');
+      expect(d.ms).toBe(0);
+      expect(d.exact).toBe(false);
+    });
   });
 
   describe('bare-number fallback', () => {

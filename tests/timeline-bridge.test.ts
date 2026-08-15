@@ -240,6 +240,34 @@ describe('transcriptToTimeline - recovered vs. live errors', () => {
     expect(eventsOfType(timeline.events ?? [], 'error')).toHaveLength(0);
   });
 
+  it('positions the synthetic error at the tail when the run has NO parseable wall-clock', () => {
+    // No `# ...` heading and a time-less filename ⇒ startedAtMs AND endedAtMs are
+    // both NaN, so neither the real-window nor the finite-start fallback applies.
+    // This is the ONLY path that exercises the anchor-based error timestamp
+    // (`anchorMs + (actionItems.length + 1) * 1000 - 1`), and the branch that
+    // suppresses the end event when startMs is not finite.
+    const t = parse(
+      '## Task\nx\n## Actions Taken\n1. tried step one\n2. tried step two\n## Outcome\nfail\n## Errors & Retries\nSensor read timed out badly here\n',
+      'sentinel/notes.md',
+    );
+    expect(Number.isNaN(t.identity.startedAtMs)).toBe(true);
+    expect(Number.isNaN(t.endedAtMs)).toBe(true);
+    expect(t.hadErrors).toBe(true);
+    expect(t.outcome).toBe('fail');
+    expect(t.actionItems.length).toBe(2);
+
+    const events = transcriptToTimeline(t).events ?? [];
+    // Two synthetic 1s-cadence outputs (1000, 2000), then the error at the tail.
+    // No start event (startMs NaN) and no end event (finite-start guard fails).
+    expect(typesOf(events)).toEqual(['output', 'output', 'error']);
+    const errors = eventsOfType(events, 'error');
+    expect(errors).toHaveLength(1);
+    // anchorMs(0) + (2 + 1) * 1000 - 1 = 2999, strictly after both outputs.
+    expect(ms(errors[0]!)).toBe(2999);
+    expect(ms(errors[0]!)).toBe(Math.max(...events.map(ms)));
+    expect(errors[0]!.content).toContain('Sensor read timed out');
+  });
+
   it('truncates long error content to 280 chars with an ellipsis', () => {
     // Multi-word (>=2 tokens) so `hadErrors` registers, and long enough to clip.
     const longErr = 'sensor read failed retrying '.repeat(20).trim();

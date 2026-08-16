@@ -242,6 +242,23 @@ describe('extractScoreConsistency', () => {
     const signal2 = extractScoreConsistency(result, { maxScoreRange: 0.3 });
     expect(signal2.flagged).toBe(true);
   });
+
+  it('reports "moderate" variation for a mid-range spread that is not flagged', () => {
+    // range = 0.30: above the 0.2 "consistent" cutoff but at/under the default
+    // maxScoreRange (0.6), so it is neither consistent nor flagged -> exercises
+    // the else branch of the reasoning ladder (previously unasserted).
+    const result = makeJudgeResult({
+      criterionScores: [
+        { criterionId: 'a', rawScore: 4, normalizedScore: 0.75, maxScore: 5, reasoning: 'Solid, on-point analysis', evidence: ['e'], confidence: 0.9 },
+        { criterionId: 'b', rawScore: 3, normalizedScore: 0.45, maxScore: 5, reasoning: 'Weaker but acceptable', evidence: ['e'], confidence: 0.8 },
+      ] as CriterionScore[],
+    });
+    const signal = extractScoreConsistency(result, {});
+    expect(signal.flagged).toBe(false);
+    expect(signal.reasoning).toContain('Moderate score variation');
+    expect(signal.reasoning).toContain('within acceptable limits');
+    expect(signal.reasoning).toContain('range=0.30');
+  });
 });
 
 // ─── Boundary Proximity ─────────────────────────────────────────────────────────
@@ -311,6 +328,18 @@ describe('extractCoverageCompleteness', () => {
     const signal = extractCoverageCompleteness(result, 2, {});
     expect(signal.score).toBe(0.5); // only 1/2 effectively scored
     expect(signal.flagged).toBe(true);
+  });
+
+  it('scores 0 and flags when expectedCriteriaCount is 0 (degenerate divisor guard)', () => {
+    // expectedCriteriaCount <= 0 hits the `> 0 ? ... : 0` guards for both
+    // coverage and effectiveCoverage, and the final else reasoning branch.
+    // Previously untested; guards against a divide-by-zero regression.
+    const result = makeJudgeResult(); // 2 criteria present, but 0 expected
+    const signal = extractCoverageCompleteness(result, 0, {});
+    expect(signal.score).toBe(0);
+    expect(signal.flagged).toBe(true);
+    expect(signal.reasoning).toContain('2/0 criteria present');
+    expect(signal.reasoning).toContain('(0%)');
   });
 });
 

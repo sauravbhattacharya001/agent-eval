@@ -60,6 +60,35 @@ describe('completeness-metrics seam', () => {
     expect(checkBalancedBrackets('(a[b)').balanced).toBe(false);
     expect(findConsecutiveDuplicates('x\nx\nx').maxRun).toBe(3);
   });
+
+  it('reports WHY brackets are unbalanced (the diagnostic details string)', () => {
+    // Unexpected closing with an empty stack.
+    expect(checkBalancedBrackets(')')).toEqual({
+      balanced: false,
+      details: "Unexpected closing ')' at position 0",
+    });
+    // Mismatched pair: opened '(' but closed with ']'.
+    expect(checkBalancedBrackets('(a]')).toEqual({
+      balanced: false,
+      details: "Expected ')' but found ']' at position 2",
+    });
+    // Unclosed opener names the still-expected closer.
+    expect(checkBalancedBrackets('(')).toEqual({
+      balanced: false,
+      details: "Unclosed brackets: expected ')'",
+    });
+    // Multiple unclosed openers are reported outermost-first (stack reversed).
+    expect(checkBalancedBrackets('({[').details).toBe(
+      "Unclosed brackets: expected ']', '}', ')'",
+    );
+  });
+
+  it('ignores brackets inside string literals', () => {
+    // A stray ')' inside double quotes must not be treated as a real bracket.
+    expect(checkBalancedBrackets('var s = ")";')).toEqual({ balanced: true, details: '' });
+    // Backtick-delimited strings are skipped too.
+    expect(checkBalancedBrackets('`a)b`')).toEqual({ balanced: true, details: '' });
+  });
 });
 
 describe('completeness-analysis re-export stability', () => {

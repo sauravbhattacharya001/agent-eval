@@ -223,6 +223,45 @@ describe('analyzeRepetition', () => {
     expect(result.totalSegments).toBe(4);
     expect(result.uniqueSegments).toBeLessThanOrEqual(result.totalSegments);
   });
+
+  // Long-text branch: for text > 2000 chars with > 3 paragraphs, segments are
+  // split by PARAGRAPH (not sentence). Guards the `text.length > 2000` selector.
+  it('splits long multi-paragraph text by paragraph, not sentence', () => {
+    const rep =
+      'Alpha paragraph. ' +
+      'This distinct block discusses topic alpha at length and is reused verbatim. '.repeat(4);
+    const uniq = (i: number): string =>
+      `Paragraph ${i}: ` +
+      `unique content variant ${i} number ${i} ${'y'.repeat(30)}. `.repeat(4);
+    const text = [rep, rep, rep, uniq(1), uniq(2), uniq(3), uniq(4)].join('\n\n');
+
+    // Preconditions that route into the paragraph branch.
+    expect(text.length).toBeGreaterThan(2000);
+    expect(text.split(/\n\s*\n/).filter((p) => p.trim()).length).toBeGreaterThan(3);
+
+    const result = analyzeRepetition(text);
+    // 7 paragraphs → 7 segments (paragraph split). A sentence split would yield
+    // far more than 7, so this pins that the paragraph branch was taken.
+    expect(result.totalSegments).toBe(7);
+    expect(result.hasRepetition).toBe(true);
+    expect(result.instances).toHaveLength(1);
+    expect(result.instances[0]!.count).toBe(3);
+    expect(result.instances[0]!.kind).toBe('exact');
+  });
+
+  // Long text (> 2000 chars) but <= 3 paragraphs falls back to sentence split.
+  it('falls back to sentence split for long text with few paragraphs', () => {
+    const rep = 'This exact sentence is deliberately repeated to be detected. ';
+    const text = rep.repeat(3) + 'Filler sentence number here. '.repeat(70);
+
+    expect(text.length).toBeGreaterThan(2000);
+    expect(text.split(/\n\s*\n/).filter((p) => p.trim()).length).toBeLessThanOrEqual(3);
+
+    const result = analyzeRepetition(text);
+    // Sentence split yields many segments (far more than a paragraph split's 1).
+    expect(result.totalSegments).toBeGreaterThan(3);
+    expect(result.hasRepetition).toBe(true);
+  });
 });
 
 // ─── DETECT LOOPS ───────────────────────────────────────────────────────────────

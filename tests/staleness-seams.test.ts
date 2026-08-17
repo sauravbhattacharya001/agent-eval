@@ -256,3 +256,75 @@ describe('barrel: assertion factories compose the detection seam', () => {
     expect(r.message).toMatch(/too short/);
   });
 });
+
+// === detectAbandonment: the output-text-only arms, pinned directly ===============
+// The seam suite above only exercises the unbalanced-code arm; these pin the
+// other reachable branches of the text detector (each an independent option) so
+// a refactor of one arm cannot silently drop another. All Tier-1, deterministic.
+describe('seam: detectAbandonment text arms', () => {
+  it('returns no issues when output is below minLengthForCheck (early return)', () => {
+    // 'hi' is 2 chars < default 10 -> guard returns [] before any pattern runs,
+    // even though the text has no terminal punctuation.
+    expect(detectAbandonmentHome('hi')).toEqual([]);
+    // Custom threshold: a 12-char string is skipped when the floor is raised.
+    expect(detectAbandonmentHome('trails off no', { minLengthForCheck: 100 })).toEqual([]);
+  });
+
+  it('flags a long final line that ends without terminal punctuation', () => {
+    const issues = detectAbandonmentHome(
+      'This is a fairly long sentence that just trails off without ending',
+    );
+    expect(
+      issues.some(
+        (i) => i.kind === 'abandoned' && i.severity === 'warning' && /mid-sentence/.test(i.message),
+      ),
+    ).toBe(true);
+  });
+
+  it('does NOT flag mid-sentence when the last line is structural (heading)', () => {
+    // Last non-empty line starts with '#' -> isStructural short-circuits the
+    // punctuation check, so no mid-sentence issue is raised despite no period.
+    const issues = detectAbandonmentHome(
+      'Some intro text goes here for length\n# A heading with no punctuation at all here',
+    );
+    expect(issues.some((i) => /mid-sentence/.test(i.message))).toBe(false);
+  });
+
+  it('does NOT flag mid-sentence when checkIncompleteSentence is disabled', () => {
+    const issues = detectAbandonmentHome(
+      'This is a fairly long sentence that just trails off without ending',
+      { checkIncompleteSentence: false },
+    );
+    expect(issues.some((i) => /mid-sentence/.test(i.message))).toBe(false);
+  });
+
+  it('matches a caller-supplied custom abandonment pattern', () => {
+    const issues = detectAbandonmentHome('everything is fine here and complete.', {
+      customPatterns: [/fine/],
+    });
+    expect(
+      issues.some(
+        (i) => i.kind === 'abandoned' && /custom abandonment pattern/.test(i.message),
+      ),
+    ).toBe(true);
+  });
+
+  it('counts embedded TODO/placeholder markers (de-duplicated in the evidence)', () => {
+    const issues = detectAbandonmentHome(
+      'Implemented the feature. TODO: write tests. FIXME later, and another TODO here.',
+    );
+    const todo = issues.find((i) => /TODO\/placeholder marker/.test(i.message));
+    expect(todo).toBeDefined();
+    // 3 raw matches (TODO, FIXME, TODO) counted; evidence lists the 2 distinct kinds.
+    expect(todo?.message).toMatch(/3 TODO/);
+    expect(todo?.evidence).toMatch(/TODO/);
+    expect(todo?.evidence).toMatch(/FIXME/);
+  });
+
+  it('respects checkTodoMarkers=false (no marker issue even with a TODO present)', () => {
+    const issues = detectAbandonmentHome('All done here. TODO: nothing really.', {
+      checkTodoMarkers: false,
+    });
+    expect(issues.some((i) => /TODO\/placeholder marker/.test(i.message))).toBe(false);
+  });
+});

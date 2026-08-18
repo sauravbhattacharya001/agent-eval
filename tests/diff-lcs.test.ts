@@ -76,6 +76,27 @@ describe('diff-lcs: classifyChange', () => {
   it('falls back to content otherwise', () => {
     expect(classifyChange(['hello world'], ['goodbye moon'])).toBe('content');
   });
+  it('treats an empty add/remove pair as cosmetic (vacuous equality)', () => {
+    // Both sides normalize to zero-length arrays, so the length check and the
+    // `every` over an empty array are vacuously true -> cosmetic. Guards the
+    // empty-hunk edge so it can never silently become 'content'.
+    expect(classifyChange([], [])).toBe('cosmetic');
+  });
+  it('does not treat equal-length non-permutations as reorder', () => {
+    // Same count of adds/dels but the sorted contents differ, so the reorder
+    // `every` short-circuits false and we fall through to content.
+    expect(classifyChange(['aa', 'bb'], ['cc', 'dd'])).toBe('content');
+  });
+  it('classifies an unequal-length add-only change as content', () => {
+    // Length mismatch skips both the cosmetic and reorder fast-paths and, with
+    // no structural keyword, lands on content.
+    expect(classifyChange(['new line'], [])).toBe('content');
+  });
+  it('detects structural changes announced only on the deletion side', () => {
+    // The structural OR-branch must fire when the keyword line is being removed,
+    // not just when it is added.
+    expect(classifyChange(['plain text'], ['import x from "y"'])).toBe('structural');
+  });
 });
 
 describe('diff-lcs: groupIntoHunks', () => {
@@ -96,5 +117,19 @@ describe('diff-lcs: groupIntoHunks', () => {
     const entries = computeDiff(original, modified);
     const hunks = groupIntoHunks(entries, 1);
     expect(hunks.length).toBeGreaterThanOrEqual(2);
+  });
+  it('propagates a cosmetic classification onto the grouped hunk', () => {
+    // Whitespace-only edit must surface as a cosmetic hunk, not content -
+    // exercises classifyChange being called from the flush path.
+    const entries = computeDiff(['a  b', 'k'], ['a b', 'k']);
+    const hunks = groupIntoHunks(entries, 3);
+    expect(hunks).toHaveLength(1);
+    expect(hunks[0]?.kind).toBe('cosmetic');
+  });
+  it('propagates a structural classification onto the grouped hunk', () => {
+    const entries = computeDiff(['x'], ['export const x = 1']);
+    const hunks = groupIntoHunks(entries, 3);
+    expect(hunks).toHaveLength(1);
+    expect(hunks[0]?.kind).toBe('structural');
   });
 });

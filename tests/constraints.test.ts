@@ -106,6 +106,35 @@ describe('validateRule', () => {
       const result = validateRule('function hello() { return 1; }', rule);
       expect(result).toBeNull();
     });
+
+    it('matches a RegExp value case-insensitively by default (rebuilds with i flag)', () => {
+      // value has no 'i' flag and caseSensitive is unset (defaults false), so the
+      // rule engine rebuilds the RegExp with 'i' — uppercase text must still match.
+      const rule: ConstraintRule = { kind: 'required', match: 'regex', value: /function/ };
+      const result = validateRule('FUNCTION hello() {}', rule);
+      expect(result).toBeNull();
+    });
+
+    it('preserves case-sensitivity when caseSensitive=true on a RegExp value', () => {
+      // caseSensitive:true returns the RegExp as-is (no 'i' added), so a required
+      // lowercase pattern is reported missing against uppercase text.
+      const rule: ConstraintRule = {
+        kind: 'required',
+        match: 'regex',
+        value: /function/,
+        caseSensitive: true,
+      };
+      const result = validateRule('FUNCTION hello() {}', rule);
+      expect(result).not.toBeNull();
+      expect(result!.message).toContain('Missing required regex');
+    });
+
+    it('flags a forbidden RegExp value case-insensitively by default', () => {
+      const rule: ConstraintRule = { kind: 'forbidden', match: 'regex', value: /any/ };
+      const result = validateRule('the type uses ANY here', rule);
+      expect(result).not.toBeNull();
+      expect(result!.location!.matched).toBe('ANY');
+    });
   });
 
   describe('forbidden keyword', () => {

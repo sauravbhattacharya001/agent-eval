@@ -121,6 +121,29 @@ describe('drift-segmentation: decomposeTask', () => {
     expect(reqs[0]?.description).toBe('the   widget    registry');
   });
 
+  it('falls back to a weak 0.4 requirement when a verb is present but the subject filters to empty', () => {
+    // "Fix the" — the verb 'fix' is found, but the only remaining word 'the' is a
+    // dropped determiner, so `subject` collapses to '' and extractRequirement takes
+    // its `if (!subject)` arm: action is kept, confidence drops to 0.4, and subject
+    // falls back to the whole (lower-cased) clause. This is a DIFFERENT 0.4 path from
+    // the verb-less noun-phrase fallback above.
+    const reqs = decomposeTask('Fix the');
+    expect(reqs).toHaveLength(1);
+    expect(reqs[0]?.action).toBe('fix');
+    expect(reqs[0]?.confidence).toBe(0.4);
+    expect(reqs[0]?.subject).toBe('fix the');
+  });
+
+  it('keeps confidence 0.4 with an all-determiner subject even when a verb matched', () => {
+    // 'Review the this that' — verb 'review' matched, but every following token is a
+    // stripped determiner, so the subject empties and the weak fallback fires.
+    const reqs = decomposeTask('Review the this that');
+    expect(reqs).toHaveLength(1);
+    expect(reqs[0]?.action).toBe('review');
+    expect(reqs[0]?.confidence).toBe(0.4);
+    expect(reqs[0]?.subject).toBe('review the this that');
+  });
+
   it('produces a TaskRequirement with all required fields', () => {
     const reqs: TaskRequirement[] = decomposeTask('Build the dashboard');
     const req = reqs[0];
@@ -208,6 +231,21 @@ describe('drift-segmentation: segmentOutput', () => {
     const segments = segmentOutput(output);
     // High lexical overlap across the break → treated as one continuous topic.
     expect(segments).toHaveLength(1);
+  });
+
+  it('truncates a derived paragraph-shift label longer than 50 characters', () => {
+    // deriveLabel takes the first five words of the shifted paragraph's opening line.
+    // When those five words together exceed 50 chars it is clipped to 50 + … so the
+    // label stays compact. Existing tests only exercised short derived labels.
+    const para1 = 'Alpha authentication flow reviewed thoroughly here now. '.repeat(8);
+    const longHead =
+      'Billingpipeline invoicerendering templatecaching subscriptionmanagement reconciliationengine now proceeds.';
+    const para2 = longHead + ' ' + 'invoicerendering templatecaching separately entirely done. '.repeat(6);
+    const segments = segmentOutput(`${para1}\n\n${para2}`);
+    expect(segments.length).toBeGreaterThanOrEqual(2);
+    const shifted = segments[segments.length - 1];
+    expect(shifted?.label.length).toBe(51); // 50 chars + the single ellipsis char
+    expect(shifted?.label.endsWith('\u2026')).toBe(true);
   });
 
   it('produces an OutputSegment with all required fields', () => {

@@ -154,6 +154,27 @@ describe('verification seam: similarity, contradiction & grounding', () => {
     expect(checkContradictionSeam('the timeout is 30 seconds', 'bananas are yellow')).toBe(false);
   });
 
+  it('checkContradiction does not flag when both have numbers but context overlap is low', () => {
+    // Both claim and reference carry numbers (so the number-presence guard passes),
+    // but their word overlap (~0.125) is below the 0.4 threshold, so they are not
+    // "the same context, different numbers" — the low-overlap guard returns false
+    // before the number comparison runs. Distinct from the 'bananas' case above,
+    // which returns false at the number-presence guard (no numbers in reference).
+    expect(
+      checkContradictionSeam('the timeout is 30 seconds', 'the server has 99 widgets in stock today'),
+    ).toBe(false);
+  });
+
+  it('checkContradiction does not flag near-equal numbers in the same context', () => {
+    // Identical context (overlap 1.0, above threshold) with numbers that differ but
+    // only slightly (30 vs 33 => relative diff ~0.09, at/below the 0.3 tolerance).
+    // The number loop runs to completion without tripping, so this is a false —
+    // the complementary arm to the 30-vs-120 contradiction above.
+    expect(
+      checkContradictionSeam('the timeout is 30 seconds', 'the timeout is 33 seconds'),
+    ).toBe(false);
+  });
+
   it('verifyClaim marks a claim unverifiable when there are no references', () => {
     const v = verifyClaimSeam(makeClaim('the moon is made of cheese'), []);
     expect(v.status).toBe('unverifiable');

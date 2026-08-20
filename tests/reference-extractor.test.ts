@@ -117,6 +117,21 @@ describe('extractReferences (direct module)', () => {
       expect(valuesOf('url', '(https://example.com/x)')).toEqual(['https://example.com/x']);
     });
 
+    it('trims a run of mixed trailing punctuation (e.g. `).`)', () => {
+      // The trim class is `[.,;:!?)]+$` - a whole trailing run is stripped, not
+      // just the final char. `).` after a query string must both come off.
+      expect(valuesOf('url', 'see https://example.com/x?a=1).')).toEqual([
+        'https://example.com/x?a=1',
+      ]);
+    });
+
+    it('trims trailing `!` and `?` sentence punctuation', () => {
+      // `!` and `?` are both in the trim class; a `!?` tail comes off entirely.
+      expect(valuesOf('url', 'wow https://example.com/y!?')).toEqual([
+        'https://example.com/y',
+      ]);
+    });
+
     it('stops the URL at whitespace and angle/backtick delimiters', () => {
       expect(valuesOf('url', 'link `https://example.com/a` done')).toEqual([
         'https://example.com/a',
@@ -145,6 +160,13 @@ describe('extractReferences (direct module)', () => {
 
     it('does not surface a bare filename with an UNknown extension', () => {
       expect(valuesOf('file', 'saved output.xyz somewhere')).toEqual([]);
+    });
+
+    it('does not surface a backtick token whose extension is 9+ chars (looksLikePath cap)', () => {
+      // `looksLikePath`'s extension arm is `/\.[a-z0-9]{1,8}$/i` - a 9-char
+      // extension with no path separator fails that guard, so the backtick
+      // pattern does not tag it as a file.
+      expect(valuesOf('file', 'wrote `archive.gitignore` today')).toEqual([]);
     });
 
     it('does not misfile a URL as a path', () => {
@@ -214,6 +236,13 @@ describe('looksLikePath (direct)', () => {
 
   it('rejects a bare word with no separator or extension', () => {
     expect(looksLikePath('runner')).toBe(false);
+  });
+
+  it('accepts an 8-char extension but rejects a 9-char one (the {1,8} cap)', () => {
+    // The separator-less accept path is `/\.[a-z0-9]{1,8}$/i`; exactly 8 hits
+    // the upper bound, 9 falls through to `return false`.
+    expect(looksLikePath('a.abcdefgh')).toBe(true);
+    expect(looksLikePath('a.abcdefghi')).toBe(false);
   });
 
   it('rejects an http(s) URL', () => {

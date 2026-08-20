@@ -138,6 +138,22 @@ describe('validateJsonSchema', () => {
     expect(validateJsonSchema({ name: 'Alice', score: 'high' }, schema).valid).toBe(false);
   });
 
+  // additionalProperties is only enforced when `properties` is also present
+  // (the `&& schema.properties` guard on both arms). Without `properties`,
+  // extra keys go unvalidated - pin that documented subset limitation.
+  it('ignores additionalProperties:false when no properties are declared', () => {
+    const schema: JsonSchema = { type: 'object', additionalProperties: false };
+    // No `properties` key -> the false-arm guard is skipped, extras allowed.
+    expect(validateJsonSchema({ anything: 1, more: 2 }, schema).valid).toBe(true);
+  });
+
+  it('ignores additionalProperties schema when no properties are declared', () => {
+    const schema: JsonSchema = { type: 'object', additionalProperties: { type: 'number' } };
+    // No `properties` key -> the object-arm guard is skipped; a non-number
+    // extra key is NOT validated against the additionalProperties schema.
+    expect(validateJsonSchema({ extra: 'not-a-number' }, schema).valid).toBe(true);
+  });
+
   it('reports paths correctly for nested errors', () => {
     const schema: JsonSchema = {
       type: 'object',
